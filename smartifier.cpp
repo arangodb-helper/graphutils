@@ -84,9 +84,10 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
   int keyPos = findColPos(colHeaders, "_key", ename);
   int fromPos = findColPos(colHeaders, "_from", ename); 
   int toPos = findColPos(colHeaders, "_to", ename); 
-  if (keyPos < 0 || fromPos < 0 || toPos < 0) {
+  if (fromPos < 0 || toPos < 0) {
     return;
   }
+  // We tolerate -1 for the key pos!
   
   size_t count = 0;
 
@@ -135,7 +136,7 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
     std::string fromAttr = translate(fromPos, "_from");
     std::string toAttr = translate(toPos, "_to");
 
-    if (!fromAttr.empty() && !toAttr.empty()) {
+    if (keyPos >= 0 && !fromAttr.empty() && !toAttr.empty()) {
       // See if we have to translate _key as well:
       std::string found = parts[keyPos];
       bool quoted = false;

@@ -14,7 +14,7 @@ std::vector<std::string> countries = {"DE", "US", "FR", "UK", "AU", "CA", "MX"};
 
 int main(int argc, char* argv[]) {
   if (argc < 5) {
-    std::cout << "Usage: sampleGraphMaker <name> <NRVERTS> <NREDGES> <SEED>"
+    std::cout << "Usage: sampleGraphMaker <NAME> <NRVERTS> <NREDGES> <SEED>"
       << std::endl;
     return 0;
   }
