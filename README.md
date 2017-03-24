@@ -34,7 +34,7 @@ vertex.
 
 Simply launch the `smartifier` by doing:
 
-    smartifier <VERTEXFILE> <EDGEFILE> <SMARTGRAPHATTR> <MEMSIZE_IN_GB> [<SEPARATOR> [<QUOTECHAR>]]
+    smartifier <VERTEXFILE> <EDGEFILE> <SMARTGRAPHATTR> <MEMSIZE_IN_MB> [<SEPARATOR> [<QUOTECHAR>]]
 
 where
 
@@ -43,8 +43,8 @@ where
   - `<SMARTGRAPHATTR>` is the name of the (string-valued!) attribute for
     the smart graph sharding, this must be one of the column names of
     the vertex file
-  - `<MEMSIZE_IN_GB>` is a positive number which tells the program to
-    use at most that many GB of main memory (see below)
+  - `<MEMSIZE_IN_MB>` is a positive number which tells the program to
+    use at most that many MB of main memory (see below)
   - `<SEPARATOR>` is a single ASCII character which is used to separate
     the column entries, default is the comma ,
   - `<QUOTECHAR>` is a single ASCII character which is used as the quote

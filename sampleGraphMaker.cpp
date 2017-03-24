@@ -46,7 +46,7 @@ int main(int argc, char* argv[]) {
          << ";" << zip << "\n";
     if (i % 1000000 == 0) {
       std::cout << "Have written " << i << " vertices out of " << nrVert
-        << std::endl;
+        << " ..." << std::endl;
     }
   }
 
@@ -60,7 +60,7 @@ int main(int argc, char* argv[]) {
 
     if (i % 1000000 == 0) {
       std::cout << "Have written " << i << " edges out of " << nrEdge
-        << std::endl;
+        << " ..." << std::endl;
     }
   }
 

@@ -189,13 +189,13 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
 int main(int argc, char* argv[]) {
   if (argc < 5) {
     std::cerr << "Usage: smartifier <VERTEXFILE> <EDGEFILE> <SMARTGRAPHATTR> "
-      "<MEMSIZE_IN_GB> [<SEPARATOR> [<QUOTECHAR>]]" << std::endl;
+      "<MEMSIZE_IN_MB> [<SEPARATOR> [<QUOTECHAR>]]" << std::endl;
     return 0;
   }
   std::string vname = argv[1];
   std::string ename = argv[2];
   std::string smartAttr = argv[3];
-  size_t memGB= std::stoul(argv[4]);
+  size_t memMB= std::stoul(argv[4]);
   char sep = ',';
   char quo = '"';
   if (argc >= 6) {
@@ -241,7 +241,7 @@ int main(int argc, char* argv[]) {
     std::unordered_map<std::string, uint32_t> attTab;
     std::vector<std::string> smartAttributes;
     size_t memUsage = 0;   // strings in map plus table size
-    while (!done && memUsage < memGB*1024*1024*1024) {
+    while (!done && memUsage < memMB*1024*1024) {
       if (!getline(vin, line)) {
         done = true;
         break;
@@ -304,9 +304,13 @@ int main(int argc, char* argv[]) {
       ++count;
 
       if (count % 1000000 == 0) {
-        std::cout << "Have transformed " << count << " vertices ..."
-          << std::endl;
+        std::cout << "Have transformed " << count << " vertices, memory: "
+          << memUsage / (1024*1024) << " MB ..." << std::endl;
       }
+    }
+    if (count % 1000000 != 0) {
+      std::cout << "Have transformed " << count << " vertices, memory: "
+        << memUsage / (1024*1024) << " MB ..." << std::endl;
     }
     transformEdges(keyTab, smartAttributes, ename, sep, quo);
   }
