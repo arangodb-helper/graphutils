@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <cstdio>
+#include <unistd.h>
 
 std::vector<std::string> split(std::string const& line, char sep, char quo) {
   size_t start = 0;
@@ -45,17 +47,142 @@ std::vector<std::string> split(std::string const& line, char sep, char quo) {
   return res;
 }
 
+int findColPos(std::vector<std::string> const& colHeaders,
+                  std::string const& header,
+                  std::string const& fileName) {
+  auto it = std::find(colHeaders.begin(), colHeaders.end(), header);
+  if (it == colHeaders.end()) {
+    std::cerr << "Did not find " << header << " in column headers in file '"
+      << fileName << "'" << std::endl;
+    return -1;
+  }
+  return static_cast<int>(it - colHeaders.begin());
+}
+
 void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
                     std::vector<std::string> const& attTab,
-                    std::string ename) {
-  std::cout << "Transforming edges in " << ename << std::endl;
+                    std::string ename,
+                    char sep, char quo) {
+  std::cout << "Transforming edges in " << ename << " ..." << std::endl;
+  std::fstream ein(ename, std::ios_base::in);
+  std::fstream eout(ename + ".out", std::ios_base::out);
+  std::string line;
+
+  // First get the header line:
+  if (!getline(ein, line)) {
+    std::cerr << "Could not read header line in edge file " << ename
+      << std::endl;
+    return;
+  }
+  std::vector<std::string> colHeaders = split(line, sep, quo);
+  size_t ncols = colHeaders.size();
+
+  // Write out header:
+  eout << line << "\n";
+
+  // Try to find the _key attribute:
+  int keyPos = findColPos(colHeaders, "_key", ename);
+  int fromPos = findColPos(colHeaders, "_from", ename); 
+  int toPos = findColPos(colHeaders, "_to", ename); 
+  if (keyPos < 0 || fromPos < 0 || toPos < 0) {
+    return;
+  }
+  
   size_t count = 0;
-  for (auto const& s : attTab) {
-    std::cout << "pos: " << count++ << " val: " << s << "\n";
+
+  while (getline(ein, line)) {
+    std::vector<std::string> parts = split(line, sep, quo);
+    // Extend with empty columns to get at least the right amount of cols:
+    while (parts.size() < ncols) {
+      parts.emplace_back("");
+    }
+    
+    auto translate = [&](int pos, std::string const& name) -> std::string {
+      std::string found = parts[pos];
+      bool quoted = false;
+      if (found.size() > 1 && found[0] == quo && found[found.size()-1] == quo) {
+        quoted = true;
+        found = found.substr(1, found.size() - 2);
+      }
+      size_t slashpos = found.find('/');
+      if (slashpos == std::string::npos) {
+        // Only work if there is a slash, otherwise do not translate
+        std::cerr << "Warning: found " << name << " without a slash:\n"
+          << line << "\n";
+        return "";
+      }
+      size_t colPos = found.find(':', slashpos + 1);
+      if (colPos != std::string::npos) {
+        // already transformed
+        return found.substr(slashpos + 1, colPos - slashpos - 1);
+      }
+      std::string key = found.substr(slashpos + 1);
+      auto it = keyTab.find(key);
+      if (it == keyTab.end()) {
+        // Did not find key, simply go on
+        return "";
+      }
+      if (quoted) {
+        parts[pos] = quo + found.substr(0, slashpos + 1) + attTab[it->second]
+                         + ":" + key + quo;
+      } else {
+        parts[pos] = found.substr(0, slashpos + 1) + attTab[it->second]
+                   + ":" + key;
+      }
+      return attTab[it->second];
+    };
+    
+    std::string fromAttr = translate(fromPos, "_from");
+    std::string toAttr = translate(toPos, "_to");
+
+    if (!fromAttr.empty() && !toAttr.empty()) {
+      // See if we have to translate _key as well:
+      std::string found = parts[keyPos];
+      bool quoted = false;
+      if (found.size() > 1 && found[0] == quo && found[found.size()-1] == quo) {
+        quoted = true;
+        found = found.substr(1, found.size() - 2);
+      }
+      size_t colPos1 = found.find(':');
+      if (colPos1 == std::string::npos) {
+        // both positions found, need to add both attributes:
+        if (quoted) {
+          parts[keyPos] = quo + fromAttr + ":" + found + ":" + toAttr + quo;
+        } else {
+          parts[keyPos] = fromAttr + ":" + found + ":" + toAttr;
+        }
+      }
+    }
+
+    // Write out the potentially modified line:
+    eout << parts[0];
+    for (size_t i = 1; i < parts.size(); ++i) {
+      eout << ',' << parts[i];
+    }
+    eout << '\n';
+
+    ++count;
+
+    if (count % 1000000 == 0) {
+      std::cout << "Have transformed " << count << " edges in " << ename
+        << "..." << std::endl;
+    }
   }
-  for (auto const& p : keyTab) {
-    std::cout << "Key: " << p.first << " Value: " << p.second << "\n";
+
+  std::cout << "Have transformed " << count << " edges in " << ename
+    << ", finished." << std::endl;
+
+  ein.close();
+  eout.close();
+
+  if (!eout.good()) {
+    std::cerr << "An error happened at close time for " << ename + ".out"
+      << ", not renaming to the original name." << std::endl;
+    return;
   }
+
+  ::unlink(ename.c_str());
+  ::rename((ename + ".out").c_str(), ename.c_str());
 }
 
 int main(int argc, char* argv[]) {
@@ -89,26 +216,18 @@ int main(int argc, char* argv[]) {
   std::vector<std::string> colHeaders = split(line, sep, quo);
   size_t ncols = colHeaders.size();
 
-  // Try to find the smart graph attribute:
-  auto it = std::find(colHeaders.begin(), colHeaders.end(), smartAttr);
-  if (it == colHeaders.end()) {
-    std::cerr << "Did not find smartAttr " << smartAttr << " in column headers."
-      << std::endl;
+  int smartAttrPos = findColPos(colHeaders, smartAttr, vname);
+  if (smartAttrPos < 0) {
     return 2;
   }
-  size_t smartAttrPos = it - colHeaders.begin();
 
-  // Try to find the _key attribute:
-  it = std::find(colHeaders.begin(), colHeaders.end(), std::string("_key"));
-  if (it == colHeaders.end()) {
-    std::cerr << "Did not find _key in column headers."
-      << std::endl;
+  int keyPos = findColPos(colHeaders, "_key", vname);
+  if (keyPos < 0) {
     return 3;
   }
-  size_t keyPos = it - colHeaders.begin();
   
   // Prepare output file for vertices:
-  std::fstream vout(vname + "_out", std::ios_base::out);
+  std::fstream vout(vname + ".out", std::ios_base::out);
   
   // Write out header:
   vout << line << "\n";
@@ -184,11 +303,22 @@ int main(int argc, char* argv[]) {
       ++count;
 
       if (count % 1000000 == 0) {
-        std::cout << "Have transformed " << count << " vertices." << std::endl;
+        std::cout << "Have transformed " << count << " vertices ..."
+          << std::endl;
       }
     }
-    transformEdges(keyTab, smartAttributes, ename);
+    transformEdges(keyTab, smartAttributes, ename, sep, quo);
   }
 
+  vout.close();
+
+  if (!vout.good()) {
+    std::cerr << "An error happened at close time for " << vname + ".out"
+      << ", not renaming to the original name." << std::endl;
+    return 5;
+  }
+
+  ::unlink(vname.c_str());
+  ::rename((vname + ".out").c_str(), vname.c_str());
   return 0;
 }

@@ -10,6 +10,7 @@
 std::vector<std::string> cities = {"San Francisco", "New York", "Eppelheim"};
 std::vector<std::string> streets = {"Main Street", "Baker Street", "Butcher Street"};
 std::vector<std::string> emails = {"miller", "meier", "hans", "karl"};
+std::vector<std::string> countries = {"DE", "US", "FR", "UK", "AU", "CA", "MX"};
 
 int main(int argc, char* argv[]) {
   if (argc < 5) {
@@ -30,9 +31,10 @@ int main(int argc, char* argv[]) {
 
   std::fstream outv(vname, std::ios_base::out);
 
-  outv << "_key,name,keybak,telephone,email,age,gender,address\n";
+  outv << "_key,name,keybak,country,telephone,email,age,gender,address\n";
   for (long i = 1; i <= nrVert; ++i) {
-    outv << '"' << i << R"(",name)" << i << R"(,)" << i << ",\""
+    outv << '"' << i << "\",name" << i << "," << i << ","
+         << countries[random() % countries.size()] << ",\""
          << 1518384838843 + i << "\"," << emails[random() % emails.size()]
          << "@person" << i << ".com,";
     auto age = (random() % 80) + 20;
@@ -52,8 +54,8 @@ int main(int argc, char* argv[]) {
 
   oute << "_key,_from,_to\n";
   for (long i = 1; i <= nrEdge; ++i) {
-    auto from = random() % nrVert;
-    auto to = random() % nrVert;
+    auto from = random() % nrVert + 1;
+    auto to = random() % nrVert + 1;
     oute << '"' << i << "\",profiles/" << from << ",profiles/" << to << "\n";
 
     if (i % 1000000 == 0) {
