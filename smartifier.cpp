@@ -61,7 +61,8 @@ int findColPos(std::vector<std::string> const& colHeaders,
 
 void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
                     std::vector<std::string> const& attTab,
-                    std::string ename,
+                    std::string const& vcolname,
+                    std::string const& ename,
                     char sep, char quo) {
   std::cout << "Transforming edges in " << ename << " ..." << std::endl;
   std::fstream ein(ename, std::ios_base::in);
@@ -116,6 +117,10 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
       if (colPos != std::string::npos) {
         // already transformed
         return found.substr(slashpos + 1, colPos - slashpos - 1);
+      }
+      if (found.compare(0, slashpos, vcolname) != 0) {
+        // Only work if the collection name matches the vertex collection name
+        return "";
       }
       std::string key = found.substr(slashpos + 1);
       auto it = keyTab.find(key);
@@ -187,21 +192,23 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
 }
 
 int main(int argc, char* argv[]) {
-  if (argc < 5) {
-    std::cerr << "Usage: smartifier <VERTEXFILE> <EDGEFILE> <SMARTGRAPHATTR> "
-      "<MEMSIZE_IN_MB> [<SEPARATOR> [<QUOTECHAR>]]" << std::endl;
+  if (argc < 6) {
+    std::cerr << "Usage: smartifier <VERTEXFILE> <VERTEXCOLNAME> <EDGEFILE> "
+      "<SMARTGRAPHATTR> \\\n                  <MEMSIZE_IN_MB> [<SEPARATOR> "
+      "[<QUOTECHAR>]]" << std::endl;
     return 0;
   }
   std::string vname = argv[1];
-  std::string ename = argv[2];
-  std::string smartAttr = argv[3];
-  size_t memMB= std::stoul(argv[4]);
+  std::string vcolname = argv[2];
+  std::string ename = argv[3];
+  std::string smartAttr = argv[4];
+  size_t memMB= std::stoul(argv[5]);
   char sep = ',';
   char quo = '"';
-  if (argc >= 6) {
-    sep = argv[5][0];
-    if (argc >= 7) {
-      quo = argv[6][0];
+  if (argc >= 7) {
+    sep = argv[6][0];
+    if (argc >= 8) {
+      quo = argv[7][0];
     }
   }
 
@@ -312,7 +319,7 @@ int main(int argc, char* argv[]) {
       std::cout << "Have transformed " << count << " vertices, memory: "
         << memUsage / (1024*1024) << " MB ..." << std::endl;
     }
-    transformEdges(keyTab, smartAttributes, ename, sep, quo);
+    transformEdges(keyTab, smartAttributes, vcolname, ename, sep, quo);
   }
 
   vout.close();

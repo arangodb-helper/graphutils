@@ -34,11 +34,14 @@ vertex.
 
 Simply launch the `smartifier` by doing:
 
-    smartifier <VERTEXFILE> <EDGEFILE> <SMARTGRAPHATTR> <MEMSIZE_IN_MB> [<SEPARATOR> [<QUOTECHAR>]]
+    smartifier <VERTEXFILE> <VERTEXCOLNAME> <EDGEFILE> <SMARTGRAPHATTR> \
+               <MEMSIZE_IN_MB> [<SEPARATOR> [<QUOTECHAR>]]
 
 where
 
   - `<VERTEXFILE>` is the input file for the vertices,
+  - `<VERTEXCOLNAME>` is the name of the vertex collection of the
+    `<VERTEXFILE>`
   - `<EDGEFILE>` is the input file for the edges,
   - `<SMARTGRAPHATTR>` is the name of the (string-valued!) attribute for
     the smart graph sharding, this must be one of the column names of
@@ -61,16 +64,16 @@ the end of the vertex file), execution of the vertex file is paused and
 the edge file is transformed, according to the current translation table
 in RAM. This means that all values in the `_from` and `_to` column of
 the edge file are inspected, if they do not contain a slash, they are
-simply kept, if they contain a slash (as they should do!), the key part
-behind the slash is extracted and searched for a colon. If there is
-already one, no action is performed. If there is not yet a colon, then
-the key is looked up in the in memory tables and if it is found, the
-attribute value is translated by inserting the smart graph attribute.
-If there is a `_key` column and both `_from` and `_to` value contain
-a smart graph attribute, then the `_key` value is adapted as well, as
-long as it is not yet adapted. The resulting edge file is written next
-to the existing one, and in the end moved over the original, if all went
-well.
+simply kept, if they contain a slash (as they should do!) and the
+collection name matches `<VERTEXCOLNAME>`, the key part behind the slash
+is extracted and searched for a colon. If there is already one, no
+action is performed. If there is not yet a colon, then the key is looked
+up in the in memory tables and if it is found, the attribute value is
+translated by inserting the smart graph attribute. If there is a `_key`
+column and both `_from` and `_to` value contain a smart graph attribute,
+then the `_key` value is adapted as well, as long as it is not yet
+adapted. The resulting edge file is written next to the existing one,
+and in the end moved over the original, if all went well.
 
 This means that the time complexity is
 
