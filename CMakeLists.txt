@@ -12,12 +12,13 @@ configure_file (
 include_directories("${PROJECT_BINARY_DIR} ${PROJECT_CURRENT_SOURCE_DIR}")
 
 add_subdirectory(VelocyPack)
+add_subdirectory(docopt)
 
 add_executable(sampleGraphMaker sampleGraphMaker.cpp)
 set_property(TARGET sampleGraphMaker PROPERTY CXX_STANDARD 11)
 set_property(TARGET sampleGraphMaker PROPERTY CXX_STANDARD_REQUIRED ON)
 
 add_executable(smartifier smartifier.cpp)
-target_link_libraries(smartifier velocypack)
+target_link_libraries(smartifier velocypack docopt)
 set_property(TARGET smartifier PROPERTY CXX_STANDARD 11)
 set_property(TARGET smartifier PROPERTY CXX_STANDARD_REQUIRED ON)

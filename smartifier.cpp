@@ -16,6 +16,29 @@
 #include "VelocyPack/include/velocypack/Parser.h"
 #include "VelocyPack/include/velocypack/velocypack-aliases.h"
 
+#include "docopt/docopt.h"
+
+static const char USAGE[] =
+R"(Smartifier - transform graph data into smart graph format
+
+    Usage:
+      smartifier [--type=<type>] [--separator=<separator>]
+                 [--quoteChar=<quoteChar>] [--memory=MEMORY]
+                 <vertexFile> <vertexColl> <edgeFile> <smartGraphAttr>
+
+    Options:
+      -h --help                Show this screen.
+      --version                Show version.
+      --type=<type>            Data type "csv" or "jsonl" [default: csv]
+      --separator=<separator>  Column separator for csv type [default: ,]
+      --quoteChar=<quoteChar>  Quote character for csv type [default: "]
+      --memory=<memory>        Limit RAM usage in MiB [default: 4096]
+      <vertexFile>             File for the vertices.
+      <vertexColl>             Name of vertex collection.
+      <edgeFile>               File for the edges.
+      <smartGraphAttr>         Smart graph attribute.
+)";
+
 VPackBuilder parseLine(std::string const& line) {
   VPackBuilder b;
   b.add(VPackValue("Hallo"));
@@ -205,25 +228,22 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
 }
 
 int main(int argc, char* argv[]) {
-  if (argc < 6) {
-    std::cerr << "Usage: smartifier <VERTEXFILE> <VERTEXCOLNAME> <EDGEFILE> "
-      "<SMARTGRAPHATTR> \\\n                  <MEMSIZE_IN_MB> [<SEPARATOR> "
-      "[<QUOTECHAR>]]" << std::endl;
-    return 0;
+  std::map<std::string, docopt::value> args
+      = docopt::docopt(USAGE,
+		       { argv + 1, argv + argc },
+		       true,               // show help if requested
+		       "smartifier V1.0");  // version string
+
+  for (auto const& p : args) {
+    std::cout << "Key: " << p.first << " Value: " << p.second << std::endl;
   }
-  std::string vname = argv[1];
-  std::string vcolname = argv[2];
-  std::string ename = argv[3];
-  std::string smartAttr = argv[4];
-  size_t memMB= std::stoul(argv[5]);
-  char sep = ',';
-  char quo = '"';
-  if (argc >= 7) {
-    sep = argv[6][0];
-    if (argc >= 8) {
-      quo = argv[7][0];
-    }
-  }
+  std::string vname = args["<vertexFile>"].asString();
+  std::string vcolname = args["<vertexColl>"].asString();
+  std::string ename = args["<edgeFile>"].asString();
+  std::string smartAttr = args["<smartGraphAttr>"].asString();
+  size_t memMB= args["--memory"].asLong();
+  char sep = args["--separator"].asString()[0];
+  char quo = args["--quoteChar"].asString()[0];
 
   std::fstream vin(vname, std::ios_base::in);
   std::string line;
