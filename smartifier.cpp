@@ -11,6 +11,17 @@
 #include <cstdio>
 #include <unistd.h>
 
+#include "VelocyPack/include/velocypack/Slice.h"
+#include "VelocyPack/include/velocypack/Builder.h"
+#include "VelocyPack/include/velocypack/Parser.h"
+#include "VelocyPack/include/velocypack/velocypack-aliases.h"
+
+VPackBuilder parseLine(std::string const& line) {
+  VPackBuilder b;
+  b.add(VPackValue("Hallo"));
+  return b;
+}
+
 std::vector<std::string> split(std::string const& line, char sep, char quo) {
   size_t start = 0;
   size_t pos = 0;
