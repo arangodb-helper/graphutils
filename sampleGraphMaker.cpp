@@ -1,5 +1,7 @@
 // This program creates a social-network like graph as CSV data
 
+#include "GraphUtilsConfig.h"
+
 #include <iostream>
 #include <fstream>
 #include <string>

@@ -1,5 +1,7 @@
 // This tool allows to transfer CSV data of a graph into smart graph format
 
+#include "GraphUtilsConfig.h"
+
 #include <algorithm>
 #include <iostream>
 #include <fstream>
