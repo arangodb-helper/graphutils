@@ -9,23 +9,44 @@
 #include <unordered_map>
 #include <random>
 
+#include "docopt.h"
+
+static const char USAGE[] =
+R"(SampleGraphMaker - make a sample social graph of configurable size
+
+    Usage:
+      sampleGraphMaker [--type=<type>] 
+               <baseName> <numberVertices> <numberEdges> [<seed>]
+
+    Options:
+      -h --help                Show this screen.
+      --version                Show version.
+      --type=<type>            Data type "csv" or "jsonl" [default: csv].
+      <baseName>               Name prefix for files.
+      <numberVertices>         Number of vertices.
+      <edgeFile>               File for the edges.
+      <seed>                   Smart graph attribute [default: 1].
+)";
+
 std::vector<std::string> cities = {"San Francisco", "New York", "Eppelheim"};
 std::vector<std::string> streets = {"Main Street", "Baker Street", "Butcher Street"};
 std::vector<std::string> emails = {"miller", "meier", "hans", "karl"};
 std::vector<std::string> countries = {"DE", "US", "FR", "UK", "AU", "CA", "MX"};
 
 int main(int argc, char* argv[]) {
-  if (argc < 5) {
-    std::cout << "Usage: sampleGraphMaker <NAME> <NRVERTS> <NREDGES> <SEED>"
-      << std::endl;
-    return 0;
-  }
-  std::string name = argv[1];
+  std::map<std::string, docopt::value> args
+      = docopt::docopt(USAGE,
+		       { argv + 1, argv + argc },
+		       true,               // show help if requested
+		       "sampleGraphMaker V"
+                       GRAPHUTILS_VERSION_MAJOR "."
+                       GRAPHUTILS_VERSION_MINOR);  // version string
+  std::string name = args["<baseName>"].asString();
   std::string vname = name + "_profiles.csv";
   std::string ename = name + "_relations.csv";
-  long nrVert = std::stol(std::string(argv[2]));
-  long nrEdge = std::stol(std::string(argv[3]));
-  long seed = std::stol(std::string(argv[4]));
+  long nrVert = args["<numberVertices>"].asLong();
+  long nrEdge = args["<numberEdges>"].asLong();
+  long seed = args["<seed>"].asLong();
 
   // Random:
   std::mt19937_64 random;

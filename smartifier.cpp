@@ -11,12 +11,12 @@
 #include <cstdio>
 #include <unistd.h>
 
-#include "VelocyPack/include/velocypack/Slice.h"
-#include "VelocyPack/include/velocypack/Builder.h"
-#include "VelocyPack/include/velocypack/Parser.h"
-#include "VelocyPack/include/velocypack/velocypack-aliases.h"
+#include "velocypack/Slice.h"
+#include "velocypack/Builder.h"
+#include "velocypack/Parser.h"
+#include "velocypack/velocypack-aliases.h"
 
-#include "docopt/docopt.h"
+#include "docopt.h"
 
 static const char USAGE[] =
 R"(Smartifier - transform graph data into smart graph format
@@ -232,7 +232,9 @@ int main(int argc, char* argv[]) {
       = docopt::docopt(USAGE,
 		       { argv + 1, argv + argc },
 		       true,               // show help if requested
-		       "smartifier V1.0");  // version string
+		       "smartifier V"
+                       GRAPHUTILS_VERSION_MAJOR "."
+                       GRAPHUTILS_VERSION_MINOR);  // version string
 
   for (auto const& p : args) {
     std::cout << "Key: " << p.first << " Value: " << p.second << std::endl;
