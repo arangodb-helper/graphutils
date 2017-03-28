@@ -236,9 +236,6 @@ int main(int argc, char* argv[]) {
                        GRAPHUTILS_VERSION_MAJOR "."
                        GRAPHUTILS_VERSION_MINOR);  // version string
 
-  for (auto const& p : args) {
-    std::cout << "Key: " << p.first << " Value: " << p.second << std::endl;
-  }
   std::string vname = args["<vertexFile>"].asString();
   std::string vcolname = args["<vertexColl>"].asString();
   std::string ename = args["<edgeFile>"].asString();
