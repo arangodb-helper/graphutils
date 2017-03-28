@@ -107,10 +107,10 @@ int findColPos(std::vector<std::string> const& colHeaders,
   return static_cast<int>(it - colHeaders.begin());
 }
 
-void transformEdges(Translation& translation,
-                    std::string const& vcolname,
-                    std::string const& ename,
-                    char sep, char quo) {
+void transformEdgesCSV(Translation& translation,
+                       std::string const& vcolname,
+                       std::string const& ename,
+                       char sep, char quo) {
   std::cout << "Transforming edges in " << ename << " ..." << std::endl;
   std::fstream ein(ename, std::ios_base::in);
   std::fstream eout(ename + ".out", std::ios_base::out);
@@ -238,6 +238,11 @@ void transformEdges(Translation& translation,
   ::rename((ename + ".out").c_str(), ename.c_str());
 }
 
+void transformEdgesJSONL(Translation& translation,
+                         std::string const& vcolname,
+                         std::string const& ename) {
+}
+
 void transformVertexCSV(std::string const& line, char sep, char quo,
                         size_t ncols, int smartAttrPos, int keyPos,
                         Translation& translation, std::fstream& vout) {
@@ -252,14 +257,14 @@ void transformVertexCSV(std::string const& line, char sep, char quo,
   auto it = translation.attTab.find(att);
   uint32_t pos;
   if (it == translation.attTab.end()) {
-  translation.smartAttributes.emplace_back(att);
-  pos = static_cast<uint32_t>(translation.smartAttributes.size() - 1);
-  translation.attTab.insert(std::make_pair(att, pos));
-  translation.memUsage +=
-      sizeof(std::pair<std::string, uint32_t>) // attTab
-      + att.size()+1                           // actual string
-      + sizeof(std::string)                    // smartAttributes
-      + att.size()+1;                          // actual string
+    translation.smartAttributes.emplace_back(att);
+    pos = static_cast<uint32_t>(translation.smartAttributes.size() - 1);
+    translation.attTab.insert(std::make_pair(att, pos));
+    translation.memUsage +=
+        sizeof(std::pair<std::string, uint32_t>) // attTab
+        + att.size()+1                           // actual string
+        + sizeof(std::string)                    // smartAttributes
+        + att.size()+1;                          // actual string
   } else {
     pos = it->second;
   }
@@ -384,7 +389,11 @@ int main(int argc, char* argv[]) {
       std::cout << "Have transformed " << count << " vertices, memory: "
         << translation.memUsage / (1024*1024) << " MB ..." << std::endl;
     }
-    transformEdges(translation, vcolname, ename, sep, quo);
+    if (type == CSV) {
+      transformEdgesCSV(translation, vcolname, ename, sep, quo);
+    } else {
+      transformEdgesJSONL(translation, vcolname, ename);
+    }
   }
 
   vout.close();

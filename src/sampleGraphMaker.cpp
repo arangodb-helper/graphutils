@@ -118,9 +118,11 @@ int main(int argc, char* argv[]) {
 
   std::fstream oute(ename, std::ios_base::out);
 
+  if (type == CSV) {
+    oute << "_key,_from,_to\n";
+  }
   for (long i = 1; i <= nrEdge; ++i) {
     if (type == CSV) {
-      oute << "_key,_from,_to\n";
         auto from = random() % nrVert + 1;
         auto to = random() % nrVert + 1;
         oute << '"' << i << "\",profiles/" << from << ",profiles/" << to << "\n";
