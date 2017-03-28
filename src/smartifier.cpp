@@ -14,6 +14,7 @@
 #include "velocypack/Slice.h"
 #include "velocypack/Builder.h"
 #include "velocypack/Parser.h"
+#include "velocypack/Iterator.h"
 #include "velocypack/velocypack-aliases.h"
 
 #include "docopt.h"
@@ -241,6 +242,141 @@ void transformEdgesCSV(Translation& translation,
 void transformEdgesJSONL(Translation& translation,
                          std::string const& vcolname,
                          std::string const& ename) {
+  std::cout << "Transforming edges in " << ename << " ..." << std::endl;
+  std::fstream ein(ename, std::ios_base::in);
+  std::fstream eout(ename + ".out", std::ios_base::out);
+  std::string line;
+
+  size_t count = 0;
+
+  while (getline(ein, line)) {
+    // Parse line to VelocyPack:
+    std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
+    VPackSlice s = b->slice();
+
+    auto translate = [&](std::string const& name, std::string& newValue,
+                         bool& foundFlag) 
+                     -> std::string {
+      VPackSlice foundSlice = s.get(name);
+      if (foundSlice.isNone()) {
+        foundFlag = false;
+        newValue = "";
+        return "";
+      }
+      if (!foundSlice.isString()) {
+        newValue.clear();
+        foundFlag = true;
+        return "";  // attribute not there, no transformation
+      }
+      foundFlag = true;
+      newValue.clear();  // indicate unchanged
+      std::string found = foundSlice.copyString();
+      size_t slashpos = found.find('/');
+      if (slashpos == std::string::npos) {
+        // Only work if there is a slash, otherwise do not translate
+        std::cerr << "Warning: found " << name << " without a slash:\n"
+          << line << "\n";
+        return "";
+      }
+      size_t colPos = found.find(':', slashpos + 1);
+      if (colPos != std::string::npos) {
+        // already transformed
+        return found.substr(slashpos + 1, colPos - slashpos - 1);
+      }
+      if (found.compare(0, slashpos, vcolname) != 0) {
+        // Only work if the collection name matches the vertex collection name
+        return "";
+      }
+      std::string key = found.substr(slashpos + 1);
+      auto it = translation.keyTab.find(key);
+      if (it == translation.keyTab.end()) {
+        // Did not find key, simply go on
+        return "";
+      }
+      newValue = found.substr(0, slashpos + 1) 
+                 + translation.smartAttributes[it->second] + ":" + key;
+      return translation.smartAttributes[it->second];
+    };
+    
+    std::string newFrom, newTo;
+    bool foundFrom, foundTo;
+    std::string fromAttr = translate("_from", newFrom, foundFrom);
+    std::string toAttr = translate("_to", newTo, foundTo);
+
+    std::string newKey;
+    bool foundKey = false;
+    VPackSlice keySlice = s.get("_key");
+    if (!keySlice.isNone()) {
+      foundKey = true;
+    }
+    if (keySlice.isString() && !fromAttr.empty() && !toAttr.empty()) {
+      // See if we have to translate _key as well:
+      std::string found = keySlice.copyString();
+      size_t colPos1 = found.find(':');
+      if (colPos1 == std::string::npos) {
+        // both positions found, need to add both attributes:
+        newKey = fromAttr + ":" + found + ":" + toAttr;
+      }
+    }
+
+    // Write out the potentially modified line:
+    bool written = false;
+    eout << '{';
+    auto output = [&](bool found, std::string const& name,
+                      std::string const& newVal) {
+      if (found) {
+        if (written) {
+          eout << ',';
+        } else {
+          written = true;
+        }
+        eout << '"' << name << "\":";
+        if (!newVal.empty()) {
+          eout << '"' << newVal << '"';
+        } else {
+          eout << s.get(name).toJson();
+        }
+      }
+    };
+    output(foundKey, "_key", newKey);
+    output(foundFrom, "_from", newFrom);
+    output(foundTo, "_to", newTo);
+
+    for (auto const& p : VPackObjectIterator(s)) {
+      std::string attrName = p.key.copyString();
+      if (attrName != "_key" && attrName != "_from" && attrName != "_to") {
+        if (written) {
+          eout << ",";
+        } else {
+          written = true;
+        }
+        eout << "\"" << attrName << "\":" << p.value.toJson();
+      }
+    }
+    eout << "}\n";
+
+    ++count;
+
+    if (count % 1000000 == 0) {
+      std::cout << "Have transformed " << count << " edges in " << ename
+        << "..." << std::endl;
+    }
+  }
+
+  std::cout << "Have transformed " << count << " edges in " << ename
+    << ", finished." << std::endl;
+
+  ein.close();
+  eout.close();
+
+  if (!eout.good()) {
+    std::cerr << "An error happened at close time for " << ename + ".out"
+      << ", not renaming to the original name." << std::endl;
+    return;
+  }
+
+  ::unlink(ename.c_str());
+  ::rename((ename + ".out").c_str(), ename.c_str());
 }
 
 void transformVertexCSV(std::string const& line, char sep, char quo,
@@ -303,8 +439,72 @@ void transformVertexCSV(std::string const& line, char sep, char quo,
   vout << '\n';
 }
 
-void transformVertexJSONL(std::string const& line, Translation& translation,
+void transformVertexJSONL(std::string const& line,
+                          std::string const& smartAttr,
+                          Translation& translation,
                           std::fstream& vout) {
+  // Parse line to VelocyPack:
+  std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
+  VPackSlice s = b->slice();
+
+  VPackSlice keySlice = s.get("_key");
+  if (!keySlice.isString()) {
+    vout << line << "\n";
+  } else {
+    std::string key = keySlice.copyString();
+    std::string newKey;
+    std::string att;
+    size_t splitPos = key.find(':');
+    uint32_t pos = 0;
+    if (splitPos != std::string::npos) {
+      newKey = key;
+      att = key.substr(0, splitPos);
+      key.erase(0, splitPos + 1);
+    } else {
+      // Need to transform key, where is the smart graph attribute?
+      VPackSlice attSlice = s.get(smartAttr);
+      if (attSlice.isString()) {
+        // Store smartGraphAttribute in infrastructure if not already seen:
+        att = attSlice.copyString();
+        // Put the smart graph attribute into a prefix of the key:
+        newKey = att + ":" + key;
+      } else {
+        newKey = key;
+      }
+    }
+    if (!att.empty()) {
+      auto it = translation.attTab.find(att);
+      if (it == translation.attTab.end()) {
+        translation.smartAttributes.emplace_back(att);
+        pos = static_cast<uint32_t>(translation.smartAttributes.size() - 1);
+        translation.attTab.insert(std::make_pair(att, pos));
+        translation.memUsage +=
+            sizeof(std::pair<std::string, uint32_t>) // attTab
+            + att.size()+1                           // actual string
+            + sizeof(std::string)                    // smartAttributes
+            + att.size()+1;                          // actual string
+      } else {
+        pos = it->second;
+      }
+      it = translation.keyTab.find(key);
+      if (it == translation.keyTab.end()) {
+        translation.keyTab.insert(std::make_pair(key, pos));
+        translation.memUsage += sizeof(std::pair<std::string, uint32_t>) 
+                                + key.size()+1;
+          // keyTab and actual string
+      }
+    }
+
+    // Write out the potentially modified line:
+    vout << R"({"_key":")" << newKey << "\"";
+    for (auto const& p : VPackObjectIterator(s)) {
+      std::string attrName = p.key.copyString();
+      if (attrName != "_key") {
+        vout << ",\"" << attrName << "\":" << p.value.toJson();
+      }
+    }
+    vout << "}\n";
+  }
 }
 
 int main(int argc, char* argv[]) {
@@ -375,7 +575,7 @@ int main(int argc, char* argv[]) {
         transformVertexCSV(line, sep, quo, ncols, smartAttrPos, keyPos,
                            translation, vout);
       } else {
-        transformVertexJSONL(line, translation, vout);
+        transformVertexJSONL(line, smartAttr, translation, vout);
       }
 
       ++count;

@@ -90,7 +90,6 @@ int main(int argc, char* argv[]) {
       }
     }
   } else {  // JSONL
-    outv << "_key,name,keybak,country,telephone,email,age,gender,address\n";
     for (long i = 1; i <= nrVert; ++i) {
       outv << '{'
            << R"("_key":")" << i << "\","
