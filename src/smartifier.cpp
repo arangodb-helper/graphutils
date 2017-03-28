@@ -39,6 +39,18 @@ R"(Smartifier - transform graph data into smart graph format
       <smartGraphAttr>         Smart graph attribute.
 )";
 
+enum DataType {
+  CSV = 0,
+  JSONL = 1
+};
+
+struct Translation {
+  std::unordered_map<std::string, uint32_t> keyTab;
+  std::unordered_map<std::string, uint32_t> attTab;
+  std::vector<std::string> smartAttributes;
+  size_t memUsage = 0;   // strings in map plus table size
+};
+
 VPackBuilder parseLine(std::string const& line) {
   VPackBuilder b;
   b.add(VPackValue("Hallo"));
@@ -95,8 +107,7 @@ int findColPos(std::vector<std::string> const& colHeaders,
   return static_cast<int>(it - colHeaders.begin());
 }
 
-void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
-                    std::vector<std::string> const& attTab,
+void transformEdges(Translation& translation,
                     std::string const& vcolname,
                     std::string const& ename,
                     char sep, char quo) {
@@ -159,19 +170,19 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
         return "";
       }
       std::string key = found.substr(slashpos + 1);
-      auto it = keyTab.find(key);
-      if (it == keyTab.end()) {
+      auto it = translation.keyTab.find(key);
+      if (it == translation.keyTab.end()) {
         // Did not find key, simply go on
         return "";
       }
       if (quoted) {
-        parts[pos] = quo + found.substr(0, slashpos + 1) + attTab[it->second]
-                         + ":" + key + quo;
+        parts[pos] = quo + found.substr(0, slashpos + 1) 
+            + translation.smartAttributes[it->second] + ":" + key + quo;
       } else {
-        parts[pos] = found.substr(0, slashpos + 1) + attTab[it->second]
-                   + ":" + key;
+        parts[pos] = found.substr(0, slashpos + 1) 
+                   + translation.smartAttributes[it->second] + ":" + key;
       }
-      return attTab[it->second];
+      return translation.smartAttributes[it->second];
     };
     
     std::string fromAttr = translate(fromPos, "_from");
@@ -227,6 +238,70 @@ void transformEdges(std::unordered_map<std::string, uint32_t> const& keyTab,
   ::rename((ename + ".out").c_str(), ename.c_str());
 }
 
+void transformVertexCSV(std::string const& line, char sep, char quo,
+                        size_t ncols, int smartAttrPos, int keyPos,
+                        Translation& translation, std::fstream& vout) {
+  std::vector<std::string> parts = split(line, sep, quo);
+  // Extend with empty columns to get at least the right amount of cols:
+  while (parts.size() < ncols) {
+    parts.emplace_back("");
+  }
+    
+  // Store smartGraphAttribute in infrastructure if not already seen:
+  std::string const& att = parts[smartAttrPos];
+  auto it = translation.attTab.find(att);
+  uint32_t pos;
+  if (it == translation.attTab.end()) {
+  translation.smartAttributes.emplace_back(att);
+  pos = static_cast<uint32_t>(translation.smartAttributes.size() - 1);
+  translation.attTab.insert(std::make_pair(att, pos));
+  translation.memUsage +=
+      sizeof(std::pair<std::string, uint32_t>) // attTab
+      + att.size()+1                           // actual string
+      + sizeof(std::string)                    // smartAttributes
+      + att.size()+1;                          // actual string
+  } else {
+    pos = it->second;
+  }
+
+  // Put the smart graph attribute into a prefix of the key, if it
+  // is not already there:
+  std::string key = parts[keyPos];  // Copy here temporarily!
+  bool quoted = false;
+  if (key.size() > 1 && key[0] == quo && key[key.size()-1] == quo) {
+    key = key.substr(1, key.size() - 2);
+    quoted = true;
+  }
+  size_t splitPos = key.find(':');
+  if (splitPos == std::string::npos) {
+    // not yet transformed:
+    if (quoted) {
+      parts[keyPos] = quo + att + ":" + key + quo;
+    } else {
+      parts[keyPos] = att + ":" + key;
+    }
+  } else {
+    key.erase(0, splitPos + 1);
+  }
+  it = translation.keyTab.find(key);
+  if (it == translation.keyTab.end()) {
+    translation.keyTab.insert(std::make_pair(key, pos));
+    translation.memUsage += sizeof(std::pair<std::string, uint32_t>)   // keyTab
+                            + key.size()+1;                     // actual string
+  }
+
+    // Write out the potentially modified line:
+  vout << parts[0];
+  for (size_t i = 1; i < parts.size(); ++i) {
+    vout << ',' << parts[i];
+  }
+  vout << '\n';
+}
+
+void transformVertexJSONL(std::string const& line, Translation& translation,
+                          std::fstream& vout) {
+}
+
 int main(int argc, char* argv[]) {
   std::map<std::string, docopt::value> args
       = docopt::docopt(USAGE,
@@ -243,115 +318,73 @@ int main(int argc, char* argv[]) {
   size_t memMB= args["--memory"].asLong();
   char sep = args["--separator"].asString()[0];
   char quo = args["--quoteChar"].asString()[0];
+  DataType type = CSV;
+  if (args["--type"].asString() == "jsonl") {
+    type = JSONL;
+  }
 
   std::fstream vin(vname, std::ios_base::in);
   std::string line;
 
-  // First get the header line:
-  if (!getline(vin, line)) {
-    std::cerr << "Could not read header line in vertex file " << vname
-      << std::endl;
-    return 1;
-  }
-  std::vector<std::string> colHeaders = split(line, sep, quo);
-  size_t ncols = colHeaders.size();
-
-  int smartAttrPos = findColPos(colHeaders, smartAttr, vname);
-  if (smartAttrPos < 0) {
-    return 2;
-  }
-
-  int keyPos = findColPos(colHeaders, "_key", vname);
-  if (keyPos < 0) {
-    return 3;
-  }
-  
   // Prepare output file for vertices:
   std::fstream vout(vname + ".out", std::ios_base::out);
   
-  // Write out header:
-  vout << line << "\n";
+  size_t ncols = 0;
+  int smartAttrPos = 0;
+  int keyPos = 0;
+  if (type == CSV) {
+    // First get the header line:
+    if (!getline(vin, line)) {
+      std::cerr << "Could not read header line in vertex file " << vname
+        << std::endl;
+      return 1;
+    }
+    std::vector<std::string> colHeaders = split(line, sep, quo);
+    ncols = colHeaders.size();
+
+    smartAttrPos = findColPos(colHeaders, smartAttr, vname);
+    if (smartAttrPos < 0) {
+      return 2;
+    }
+
+    keyPos = findColPos(colHeaders, "_key", vname);
+    if (keyPos < 0) {
+      return 3;
+    }
+    
+    // Write out header:
+    vout << line << "\n";
+  }
 
   bool done = false;
   size_t count = 0;
   while (!done) {
     // We do one batch of vertices in one run of this loop
-    std::unordered_map<std::string, uint32_t> keyTab;
-    std::unordered_map<std::string, uint32_t> attTab;
-    std::vector<std::string> smartAttributes;
-    size_t memUsage = 0;   // strings in map plus table size
-    while (!done && memUsage < memMB*1024*1024) {
+    Translation translation;
+    while (!done && translation.memUsage < memMB*1024*1024) {
       if (!getline(vin, line)) {
         done = true;
         break;
       }
-      std::vector<std::string> parts = split(line, sep, quo);
-      // Extend with empty columns to get at least the right amount of cols:
-      while (parts.size() < ncols) {
-        parts.emplace_back("");
-      }
-      
-      // Store smartGraphAttribute in infrastructure if not already seen:
-      std::string const& att = parts[smartAttrPos];
-      auto it = attTab.find(att);
-      uint32_t pos;
-      if (it == attTab.end()) {
-        smartAttributes.emplace_back(att);
-        pos = static_cast<uint32_t>(smartAttributes.size() - 1);
-        attTab.insert(std::make_pair(att, pos));
-        memUsage += sizeof(std::pair<std::string, uint32_t>) // attTab
-                    + att.size()+1                           // actual string
-                    + sizeof(std::string)                    // smartAttributes
-                    + att.size()+1;                          // actual string
+      if (type == CSV) {
+        transformVertexCSV(line, sep, quo, ncols, smartAttrPos, keyPos,
+                           translation, vout);
       } else {
-        pos = it->second;
+        transformVertexJSONL(line, translation, vout);
       }
-
-      // Put the smart graph attribute into a prefix of the key, if it
-      // is not already there:
-      std::string key = parts[keyPos];  // Copy here temporarily!
-      bool quoted = false;
-      if (key.size() > 1 && key[0] == quo && key[key.size()-1] == quo) {
-        key = key.substr(1, key.size() - 2);
-        quoted = true;
-      }
-      size_t splitPos = key.find(':');
-      if (splitPos == std::string::npos) {
-        // not yet transformed:
-        if (quoted) {
-          parts[keyPos] = quo + att + ":" + key + quo;
-        } else {
-          parts[keyPos] = att + ":" + key;
-        }
-      } else {
-        key.erase(0, splitPos + 1);
-      }
-      it = keyTab.find(key);
-      if (it == keyTab.end()) {
-        keyTab.insert(std::make_pair(key, pos));
-        memUsage += sizeof(std::pair<std::string, uint32_t>)   // keyTab
-                    + key.size()+1;                            // actual string
-      }
-
-      // Write out the potentially modified line:
-      vout << parts[0];
-      for (size_t i = 1; i < parts.size(); ++i) {
-        vout << ',' << parts[i];
-      }
-      vout << '\n';
 
       ++count;
 
       if (count % 1000000 == 0) {
         std::cout << "Have transformed " << count << " vertices, memory: "
-          << memUsage / (1024*1024) << " MB ..." << std::endl;
+          << translation.memUsage / (1024*1024) << " MB ..." << std::endl;
       }
     }
     if (count % 1000000 != 0) {
       std::cout << "Have transformed " << count << " vertices, memory: "
-        << memUsage / (1024*1024) << " MB ..." << std::endl;
+        << translation.memUsage / (1024*1024) << " MB ..." << std::endl;
     }
-    transformEdges(keyTab, smartAttributes, vcolname, ename, sep, quo);
+    transformEdges(translation, vcolname, ename, sep, quo);
   }
 
   vout.close();

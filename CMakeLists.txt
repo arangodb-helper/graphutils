@@ -9,7 +9,7 @@ configure_file (
   "${PROJECT_BINARY_DIR}/GraphUtilsConfig.h"
 )
 
-include_directories("${PROJECT_BINARY_DIR}" "${PROJECT_SOURCE_DIR}")
+include_directories("${PROJECT_BINARY_DIR}")
 
 add_subdirectory(VelocyPack)
 add_subdirectory(docopt)
