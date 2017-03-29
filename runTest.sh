@@ -21,3 +21,11 @@ build/smartifier --memory 1024 --type jsonl testCase/test_profiles.jsonl profile
 cmp testCase/test_profiles.jsonl testCase/test_profiles_known.jsonl
 cmp testCase/test_relations.jsonl testCase/test_relations_known.jsonl
 rm testCase/test_profiles.jsonl testCase/test_relations.jsonl
+
+# Third test with JSONL and a few non-standard cases:
+cp testCase/test_profiles_special.jsonl testCase/test_profiles.jsonl
+cp testCase/test_relations_special.jsonl testCase/test_relations.jsonl
+build/smartifier --memory 1024 --type jsonl testCase/test_profiles.jsonl profiles testCase/test_relations.jsonl country > /dev/null
+cmp testCase/test_profiles.jsonl testCase/test_profiles_special_known.jsonl
+cmp testCase/test_relations.jsonl testCase/test_relations_special_known.jsonl
+rm testCase/test_profiles.jsonl testCase/test_relations.jsonl
