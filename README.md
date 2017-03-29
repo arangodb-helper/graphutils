@@ -24,13 +24,18 @@ attribute:
     smartifier --type jsonl export/V.jsonl V export/E.jsonl country
     arangosh --server.endpoint tcp://NEWCLUSTER:PORT
         arangosh> var sg = require("@arangodb/smart-graph");
-        arangosh> sg._create(...)
+        arangosh> var G = sg._create("G", [sg._relation("E", ["V"], ["V"])], [], {numberOfShards:3, replicationFactor:2, smartGraphAttribute: "country"})
     arangoimport --server.endpoint tcp://NEWCLUSTER:PORT --input.file export/V.jsonl --type json --collection V
     arangoimport --server.endpoint tcp://NEWCLUSTER:PORT --input.file export/E.jsonl --type json --collection E
 
 Note that the `arangoexport` utility is only available in ArangoDB >= 3.2,
 therefore you either have to install one of the prereleases or use the
-Docker image.
+Docker image. You can use `arangoexport` on an ArangoDB 3.1 without 
+a problem. Here is a sample call using Docker to export the two collections
+to the local directory `export`:
+
+    docker run -it --net=host -v `pwd`/export:/data arangodb/arangodb-preview:3.2.devel arangoexport --collection V --collection E --output-directory /data --type jsonl
+
 
 Docker image
 ------------
