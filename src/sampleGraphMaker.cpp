@@ -29,7 +29,7 @@ R"(SampleGraphMaker - make a sample social graph of configurable size
       --type=<type>            Data type "csv" or "jsonl" [default: csv].
       <baseName>               Name prefix for files.
       <numberVertices>         Number of vertices.
-      <edgeFile>               File for the edges.
+      <numberEdges>            Number of edges.
       <seed>                   Smart graph attribute [default: 1].
 )";
 
