@@ -61,19 +61,23 @@ graph attribute given with each vertex.
     Usage:
       smartifier [--type=<type>] [--separator=<separator>]
                  [--quoteChar=<quoteChar>] [--memory=MEMORY]
+                 [--smartDefault=<smartDefault>]
                  <vertexFile> <vertexColl> <edgeFile> <smartGraphAttr>
 
     Options:
-      -h --help                Show this screen.
-      --version                Show version.
-      --type=<type>            Data type "csv" or "jsonl" [default: csv]
-      --separator=<separator>  Column separator for csv type [default: ,]
-      --quoteChar=<quoteChar>  Quote character for csv type [default: "]
-      --memory=<memory>        Limit RAM usage in MiB [default: 4096]
-      <vertexFile>             File for the vertices.
-      <vertexColl>             Name of vertex collection.
-      <edgeFile>               File for the edges.
-      <smartGraphAttr>         Smart graph attribute.
+      -h --help                      Show this screen.
+      --version                      Show version.
+      --type=<type>                  Data type "csv" or "jsonl" [default: csv]
+      --separator=<separator>        Column separator for csv type [default: ,]
+      --quoteChar=<quoteChar>        Quote character for csv type [default: "]
+      --memory=<memory>              Limit RAM usage in MiB [default: 4096]
+      --smartDefault=<smartDefault>  If given, this value is taken as the value
+                                     of the smart graph attribute if it is
+                                     not given in a document (JSONL only)
+      <vertexFile>                   File for the vertices.
+      <vertexColl>                   Name of vertex collection.
+      <edgeFile>                     File for the edges.
+      <smartGraphAttr>               Smart graph attribute.
 
 where
 

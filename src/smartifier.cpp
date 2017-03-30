@@ -25,19 +25,23 @@ R"(Smartifier - transform graph data into smart graph format
     Usage:
       smartifier [--type=<type>] [--separator=<separator>]
                  [--quoteChar=<quoteChar>] [--memory=MEMORY]
+                 [--smartDefault=<smartDefault>]
                  <vertexFile> <vertexColl> <edgeFile> <smartGraphAttr>
 
     Options:
-      -h --help                Show this screen.
-      --version                Show version.
-      --type=<type>            Data type "csv" or "jsonl" [default: csv]
-      --separator=<separator>  Column separator for csv type [default: ,]
-      --quoteChar=<quoteChar>  Quote character for csv type [default: "]
-      --memory=<memory>        Limit RAM usage in MiB [default: 4096]
-      <vertexFile>             File for the vertices.
-      <vertexColl>             Name of vertex collection.
-      <edgeFile>               File for the edges.
-      <smartGraphAttr>         Smart graph attribute.
+      -h --help                      Show this screen.
+      --version                      Show version.
+      --type=<type>                  Data type "csv" or "jsonl" [default: csv]
+      --separator=<separator>        Column separator for csv type [default: ,]
+      --quoteChar=<quoteChar>        Quote character for csv type [default: "]
+      --memory=<memory>              Limit RAM usage in MiB [default: 4096]
+      --smartDefault=<smartDefault>  If given, this value is taken as the value
+                                     of the smart graph attribute if it is
+                                     not given in a document (JSONL only)
+      <vertexFile>                   File for the vertices.
+      <vertexColl>                   Name of vertex collection.
+      <edgeFile>                     File for the edges.
+      <smartGraphAttr>               Smart graph attribute.
 )";
 
 enum DataType {
@@ -442,7 +446,8 @@ void transformVertexCSV(std::string const& line, char sep, char quo,
 void transformVertexJSONL(std::string const& line,
                           std::string const& smartAttr,
                           Translation& translation,
-                          std::fstream& vout) {
+                          std::fstream& vout,
+                          std::string const& smartDefault) {
   // Parse line to VelocyPack:
   std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
   VPackSlice s = b->slice();
@@ -468,8 +473,17 @@ void transformVertexJSONL(std::string const& line,
         att = attSlice.copyString();
         // Put the smart graph attribute into a prefix of the key:
         newKey = att + ":" + key;
+      } else if (attSlice.isNone()) {
+        if (!smartDefault.empty()) {
+          att = smartDefault;
+          newKey = att + ":" + key;
+        } else {
+          newKey = key;
+        }
       } else {
         newKey = key;
+        std::cerr << "WARNING: Vertex with non-string smart graph attribute:\n"
+                  << line << "\n";
       }
     }
     if (!att.empty()) {
@@ -503,6 +517,9 @@ void transformVertexJSONL(std::string const& line,
         vout << ",\"" << attrName << "\":" << p.value.toJson();
       }
     }
+    if (s.get(smartAttr).isNone() && !smartDefault.empty()) {
+      vout << ",\"" << smartAttr << "\":\"" << smartDefault << '"';
+    }
     vout << "}\n";
   }
 }
@@ -520,6 +537,10 @@ int main(int argc, char* argv[]) {
   std::string vcolname = args["<vertexColl>"].asString();
   std::string ename = args["<edgeFile>"].asString();
   std::string smartAttr = args["<smartGraphAttr>"].asString();
+  std::string smartDefault;
+  if (args["--smartDefault"]) {
+    smartDefault = args["--smartDefault"].asString();
+  }
   size_t memMB= args["--memory"].asLong();
   char sep = args["--separator"].asString()[0];
   char quo = args["--quoteChar"].asString()[0];
@@ -575,7 +596,7 @@ int main(int argc, char* argv[]) {
         transformVertexCSV(line, sep, quo, ncols, smartAttrPos, keyPos,
                            translation, vout);
       } else {
-        transformVertexJSONL(line, smartAttr, translation, vout);
+        transformVertexJSONL(line, smartAttr, translation, vout, smartDefault);
       }
 
       ++count;
