@@ -128,6 +128,11 @@ void transformEdgesCSV(Translation& translation,
     return;
   }
   std::vector<std::string> colHeaders = split(line, sep, quo);
+  for (auto& s : colHeaders) {
+    if (s.size() >= 2 && s[0] == quo && s[s.size()-1] == quo) {
+      s = s.substr(1, s.size()-2);
+    }
+  }
   size_t ncols = colHeaders.size();
 
   // Write out header:
@@ -393,7 +398,10 @@ void transformVertexCSV(std::string const& line, char sep, char quo,
   }
     
   // Store smartGraphAttribute in infrastructure if not already seen:
-  std::string const& att = parts[smartAttrPos];
+  std::string att = parts[smartAttrPos];
+  if (att.size() >= 2 && att[0] == quo && att[att.size()-1] == quo) {
+    att = att.substr(1, att.size()-2);
+  }
   auto it = translation.attTab.find(att);
   uint32_t pos;
   if (it == translation.attTab.end()) {
@@ -566,6 +574,11 @@ int main(int argc, char* argv[]) {
       return 1;
     }
     std::vector<std::string> colHeaders = split(line, sep, quo);
+    for (auto& s : colHeaders) {
+      if (s.size() >= 2 && s[0] == quo && s[s.size()-1] == quo) {
+        s = s.substr(1, s.size()-2);
+      }
+    }
     ncols = colHeaders.size();
 
     smartAttrPos = findColPos(colHeaders, smartAttr, vname);
