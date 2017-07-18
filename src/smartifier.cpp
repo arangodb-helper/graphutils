@@ -15,6 +15,7 @@
 #include "velocypack/Builder.h"
 #include "velocypack/Parser.h"
 #include "velocypack/Iterator.h"
+#include "velocypack/ValueType.h"
 #include "velocypack/velocypack-aliases.h"
 
 #include "docopt.h"
@@ -489,9 +490,23 @@ void transformVertexJSONL(std::string const& line,
           newKey = key;
         }
       } else {
-        newKey = key;
         std::cerr << "WARNING: Vertex with non-string smart graph attribute:\n"
-                  << line << "\n";
+                  << line << ".\n";
+        switch (attSlice.type()) {
+          case VPackValueType::Bool:
+          case VPackValueType::Double:
+          case VPackValueType::UTCDate:
+          case VPackValueType::Int:
+          case VPackValueType::UInt:
+          case VPackValueType::SmallInt:
+            att = attSlice.toString();
+            newKey = att + ":" + key;
+            std::cerr << "WARNING: Converted to String.\n";
+            break;
+          default:
+            newKey = key;
+            std::cerr << "ERROR: Found a complextype, will not convert it.\n";
+        }
       }
     }
     if (!att.empty()) {
@@ -522,7 +537,12 @@ void transformVertexJSONL(std::string const& line,
     for (auto const& p : VPackObjectIterator(s)) {
       std::string attrName = p.key.copyString();
       if (attrName != "_key") {
-        vout << ",\"" << attrName << "\":" << p.value.toJson();
+        if (attrName == smartAttr && !att.empty()) {
+          // We transformed the attribute to string, write it down
+          vout << ",\"" << attrName << "\":\"" << att << "\"";
+        } else {
+          vout << ",\"" << attrName << "\":" << p.value.toJson();
+        }
       }
     }
     if (s.get(smartAttr).isNone() && !smartDefault.empty()) {
