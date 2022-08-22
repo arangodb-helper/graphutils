@@ -1,12 +1,4 @@
 #!/bin/bash
-set -e
-if [ ! -d build ] ; then
-    mkdir build
-fi
-cd build
-cmake .. > /dev/null
-make > /dev/null
-cd ..
 
 # First trivial test with CSV files:
 build/sampleGraphMaker --type csv testCase/test 10 10 1 > /dev/null

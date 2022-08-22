@@ -5,7 +5,7 @@
 {"_key":"CA:5:DE","_from":"profiles/CA:6","_to":"profiles/DE:9"}
 {"_key":"6","_from":"profiles/2","_to":"profiles/AU:10"}
 {"_key":"7","_from":"profiles/3","_to":"profiles/FR:1"}
-{"_key":"8","_from":"profiles/Max:4","_to":"profiles/5"}
+{"_key":"Max:8:1","_from":"profiles/Max:4","_to":"profiles/1:5"}
 {"_key":"FR:9:DE","_from":"profiles/FR:1","_to":"profiles/DE:9"}
 {"_key":"DE:10:CA","_from":"profiles/DE:9","_to":"profiles/CA:6"}
 {"_key":"FR:11:DE","_from":"profiles/FR:8","_to":"profiles/DE:9"}

@@ -12,7 +12,7 @@ debug:
 asan:
 	rm -rf build ; mkdir -p build ; cd build ; ../cmakung -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" -DCMAKE_BUILD_TYPE=Debug .. ; cmake --build . -- -j 64 ; cd ..
 
-test:
+test: normal
 	./runTest.sh
 
 docker:
