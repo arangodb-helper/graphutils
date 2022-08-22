@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "CommandLineParsing.h"
 #include "GraphUtilsConfig.h"
 #include "velocypack/Builder.h"
 #include "velocypack/Iterator.h"
@@ -684,150 +685,32 @@ int main2(int argc, char* argv[]) {
 }
 #endif
 
-enum ArgType {
-  Bool = 0,
-  StringOnce = 3,
-  StringMultiple = 4,
-};
+void doVertices(Options const& options) {}
 
-struct OptionInfoItem {
-  ArgType argType;
-  std::optional<std::string> defaultValue;
-  std::optional<std::string> alias;
-  OptionInfoItem(ArgType a) : argType(a) {}
-  OptionInfoItem(ArgType a, std::string d) : argType(a), defaultValue(d) {}
-  OptionInfoItem(ArgType a, std::string d, std::string al)
-      : argType(a), defaultValue(d), alias(al) {}
-  OptionInfoItem(ArgType a, int i, std::string al) : argType(a), alias(al) {}
-};
-
-int parseCommandLineArgs(
-    char const* usage,
-    std::unordered_map<std::string, OptionInfoItem> const& optionConfig,
-    int argc, char* argv[],
-    std::unordered_map<std::string, std::vector<std::string>>& options,
-    std::vector<std::string>& args) {
-  // Build alias lookup:
-  std::unordered_map<std::string, std::string> aliases;
-  for (auto const& p : optionConfig) {
-    if (p.second.alias) {
-      aliases.emplace(p.second.alias.value(), p.first);
-    }
-  }
-
-  options.clear();
-  args.clear();
-  bool pastOptions = false;
-  for (size_t i = 1; i < argc; ++i) {
-    std::string a{argv[i]};
-    std::string b;
-    if (a[0] == '-' && a.size() > 0 && !pastOptions) {  // seems to be an option
-      if (a == "--") {
-        pastOptions = true;
-      } else {
-        // Recognize = sign in option:
-        auto pos = a.find('=');
-        bool advanced = false;
-        if (pos != std::string::npos) {
-          b = a.substr(pos + 1);
-          a = a.substr(0, pos);
-        } else {
-          if (i + 1 < argc) {
-            b = argv[i + 1];
-            ++i;
-            advanced = true;
-          }
-        }
-
-        // Use aliases:
-        auto it = aliases.find(a);
-        if (it != aliases.end()) {
-          a = it->second;
-        }
-
-        // Find option in config:
-        auto it2 = optionConfig.find(a);
-        if (it2 == optionConfig.end()) {
-          std::cerr << "Unknown option '" << a << "', giving up.\n"
-                    << usage << std::endl;
-          return 1;
-        }
-
-        // Check rules:
-        ArgType at = it2->second.argType;
-
-        // Check value:
-        if (at == Bool) {
-          if (b == "false" || b == "FALSE" || b == "False" || b == "No" ||
-              b == "NO" || b == "no" || b == "f" || b == "F" || b == "n" ||
-              b == "N") {
-            b = "false";
-          } else if (b == "true" || b == "TRUE" || b == "True" || b == "Yes" ||
-                     b == "YES" || b == "yes" || b == "t" || b == "T" ||
-                     b == "y" || b == "Y") {
-            b = "true";
-          } else {  // Do not accept this argument
-            b = "true";
-            if (advanced) {
-              --i;
-            }
-          }
-        }
-
-        // Now set value:
-        auto it3 = options.find(a);
-        if (it3 == options.end()) {
-          options.emplace(a, std::vector<std::string>{b});
-        } else {
-          if (at == ArgType::StringOnce || at == ArgType::Bool) {
-            std::cerr << "Option '" << a
-                      << "' must only occur once, giving up.\n"
-                      << usage << std::endl;
-            return 2;
-          }
-          it3->second.push_back(b);
-        }
-      }
-    } else {
-      args.push_back(a);
-    }
-  }
-
-  // Finally, set defaults:
-  for (auto const& p : optionConfig) {
-    if (p.second.defaultValue) {
-      auto it = options.find(p.first);
-      if (it == options.end()) {
-        options.emplace(
-            p.first, std::vector<std::string>{p.second.defaultValue.value()});
-      }
-    }
-  }
-  return 0;
-}
+void doEdges(Options const& options) {}
 
 int main(int argc, char* argv[]) {
-  std::unordered_map<std::string, OptionInfoItem> optionConfig = {
-      {"--help", OptionInfoItem(ArgType::Bool, "false", "-h")},
-      {"--version", OptionInfoItem(ArgType::Bool, 0, "-v")},
-      {"--type", OptionInfoItem(ArgType::StringOnce, "csv", "-t")},
-      {"--input", OptionInfoItem(ArgType::StringOnce, 0, "-i")},
-      {"--output", OptionInfoItem(ArgType::StringOnce, 0, "-o")},
+  OptionConfig optionConfig = {
+      {"--help", OptionConfigItem(ArgType::Bool, "false", "-h")},
+      {"--version", OptionConfigItem(ArgType::Bool, 0, "-v")},
+      {"--type", OptionConfigItem(ArgType::StringOnce, "csv", "-t")},
+      {"--input", OptionConfigItem(ArgType::StringOnce, 0, "-i")},
+      {"--output", OptionConfigItem(ArgType::StringOnce, 0, "-o")},
       {"--smart-graph-attribute",
-       OptionInfoItem(ArgType::StringOnce, "smart_id", "-a")},
-      {"--memory", OptionInfoItem(ArgType::StringOnce, "4096", "-m")},
-      {"--separator", OptionInfoItem(ArgType::StringOnce, ",", "-s")},
-      {"--quote-char", OptionInfoItem(ArgType::StringOnce, "\"", "-q")},
-      {"--write-key", OptionInfoItem(ArgType::Bool, "true")},
-      {"--randomize-smart", OptionInfoItem(ArgType::Bool, "false")},
-      {"--smart-value", OptionInfoItem(ArgType::StringOnce)},
-      {"--from-attribute", OptionInfoItem(ArgType::StringOnce, "_from")},
-      {"--to-attribute", OptionInfoItem(ArgType::StringOnce, "_to")},
-      {"--vertices", OptionInfoItem(ArgType::StringMultiple)},
-      {"--edges", OptionInfoItem(ArgType::StringMultiple)},
+       OptionConfigItem(ArgType::StringOnce, "smart_id", "-a")},
+      {"--memory", OptionConfigItem(ArgType::StringOnce, "4096", "-m")},
+      {"--separator", OptionConfigItem(ArgType::StringOnce, ",", "-s")},
+      {"--quote-char", OptionConfigItem(ArgType::StringOnce, "\"", "-q")},
+      {"--write-key", OptionConfigItem(ArgType::Bool, "true")},
+      {"--randomize-smart", OptionConfigItem(ArgType::Bool, "false")},
+      {"--smart-value", OptionConfigItem(ArgType::StringOnce)},
+      {"--from-attribute", OptionConfigItem(ArgType::StringOnce, "_from")},
+      {"--to-attribute", OptionConfigItem(ArgType::StringOnce, "_to")},
+      {"--vertices", OptionConfigItem(ArgType::StringMultiple)},
+      {"--edges", OptionConfigItem(ArgType::StringMultiple)},
   };
 
-  std::unordered_map<std::string, std::vector<std::string>> options;
+  Options options;
   std::vector<std::string> args;
   if (parseCommandLineArgs(USAGE, optionConfig, argc, argv, options, args) !=
       0) {
@@ -845,18 +728,16 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  std::cout << "Options:\n";
-  for (auto const& o : options) {
-    std::cout << "  " << o.first << " ->";
-    for (auto const& p : o.second) {
-      std::cout << " " << p;
-    }
-    std::cout << "\n";
+  if (args.size() != 1 || args[0] == "vertices" || args[0] == "edges") {
+    std::cerr << "Need exactly one subcommand 'vertices' or 'edges'.\n";
+    return -2;
   }
-  std::cout << "Arguments:\n";
-  for (auto const& s : args) {
-    std::cout << "  " << s << "\n";
+
+  if (args[0] == "vertices") {
+    doVertices(options);
+  } else if (args[0] == "edges") {
+    doEdges(options);
   }
-  std::cout << std::endl;
+
   return 0;
 }

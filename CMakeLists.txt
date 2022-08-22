@@ -31,17 +31,16 @@ set_property(TARGET sampleGraphMaker PROPERTY CXX_STANDARD_REQUIRED ON)
 add_executable(smartifier src/smartifier.cpp)
 target_include_directories(smartifier
     PUBLIC
-
     3rdParty/docopt.cpp
 )
 target_link_libraries(smartifier velocypack docopt)
 set_property(TARGET smartifier PROPERTY CXX_STANDARD 20)
 set_property(TARGET smartifier PROPERTY CXX_STANDARD_REQUIRED ON)
 
-add_executable(smartifier2 src/smartifier2.cpp)
-target_include_directories(smartifier2
-    PUBLIC
-)
+add_executable(smartifier2 
+  src/smartifier2.cpp
+  src/CommandLineParsing.cpp)
+target_include_directories(smartifier2 PUBLIC)
 target_link_libraries(smartifier2 velocypack)
 set_property(TARGET smartifier2 PROPERTY CXX_STANDARD 20)
 set_property(TARGET smartifier2 PROPERTY CXX_STANDARD_REQUIRED ON)
