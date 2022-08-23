@@ -107,3 +107,11 @@ int parseCommandLineArgs(
   return 0;
 }
 
+std::optional<std::vector<std::string> const*> getOption(
+    Options const& options, std::string const& name) {
+  auto it = options.find(name);
+  if (it == options.end()) {
+    return {};
+  }
+  return {&it->second};
+}

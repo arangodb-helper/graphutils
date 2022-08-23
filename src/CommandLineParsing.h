@@ -27,8 +27,10 @@ struct OptionConfigItem {
 typedef std::unordered_map<std::string, OptionConfigItem> OptionConfig;
 typedef std::unordered_map<std::string, std::vector<std::string>> Options;
 
-int parseCommandLineArgs(
-    char const* usage, OptionConfig const& optionConfig, int argc, char* argv[],
-    std::unordered_map<std::string, std::vector<std::string>>& options,
-    std::vector<std::string>& args);
+int parseCommandLineArgs(char const* usage, OptionConfig const& optionConfig,
+                         int argc, char* argv[], Options& options,
+                         std::vector<std::string>& args);
+
+std::optional<std::vector<std::string> const*> getOption(
+    Options const& options, std::string const& name);
 
