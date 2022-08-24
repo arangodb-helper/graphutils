@@ -808,6 +808,7 @@ int main(int argc, char* argv[]) {
       {"--write-key", OptionConfigItem(ArgType::Bool, "true")},
       {"--randomize-smart", OptionConfigItem(ArgType::Bool, "false")},
       {"--smart-value", OptionConfigItem(ArgType::StringOnce)},
+      {"--smart-index", OptionConfigItem(ArgType::StringOnce)},
       {"--from-attribute", OptionConfigItem(ArgType::StringOnce, "_from")},
       {"--to-attribute", OptionConfigItem(ArgType::StringOnce, "_to")},
       {"--vertices", OptionConfigItem(ArgType::StringMultiple)},
