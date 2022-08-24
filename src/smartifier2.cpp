@@ -194,40 +194,66 @@ struct Translation {
   std::unordered_map<std::string, uint32_t> attTab;
   std::vector<std::string> smartAttributes;
   size_t memUsage = 0;  // strings in map plus table size
+  void clear() {
+    keyTab.clear();
+    attTab.clear();
+    smartAttributes.clear();
+    memUsage = 0;
+  }
 };
 
-void transformEdgesCSV(Translation& translation, std::string const& vcolname,
-                       std::string const& ename, char sep, char quo) {
-  std::cout << "Transforming edges in " << ename << " ..." << std::endl;
-  std::fstream ein(ename, std::ios_base::in);
-  std::fstream eout(ename + ".out", std::ios_base::out);
+struct EdgeCollection {
+  std::string fileName;
+  std::string fromVertColl;
+  std::string toVertColl;
+  std::vector<std::pair<int, std::string>> columnRenames;
+};
+
+int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
+                      char sep, char quo) {
+  std::cout << "Transforming edges in " << e.fileName << " ..." << std::endl;
+  std::fstream ein(e.fileName, std::ios_base::in);
+  std::fstream eout(e.fileName + ".out", std::ios_base::out);
   std::string line;
 
   // First get the header line:
   if (!getline(ein, line)) {
-    std::cerr << "Could not read header line in edge file " << ename
+    std::cerr << "Could not read header line in edge file " << e.fileName
               << std::endl;
-    return;
+    return 1;
   }
   std::vector<std::string> colHeaders = split(line, sep, quo);
   for (auto& s : colHeaders) {
-    if (s.size() >= 2 && s[0] == quo && s[s.size() - 1] == quo) {
-      s = s.substr(1, s.size() - 2);
-    }
+    s = unquote(s, quo);
   }
   size_t ncols = colHeaders.size();
 
+  // Rename columns:
+  for (auto const& p : e.columnRenames) {
+    if (p.first >= 0 && p.first < colHeaders.size()) {
+      colHeaders[p.first] = p.second;
+    }
+  }
+
   // Write out header:
-  eout << line << "\n";
+  bool first = true;
+  for (auto const& h : colHeaders) {
+    if (!first) {
+      eout << sep;
+    }
+    eout << quote(h, quo);
+    first = false;
+  }
+  eout << "\n";
 
   // Try to find the _key attribute:
-  int keyPos = findColPos(colHeaders, "_key", ename);
-  int fromPos = findColPos(colHeaders, "_from", ename);
-  int toPos = findColPos(colHeaders, "_to", ename);
+  int keyPos = findColPos(colHeaders, "_key", e.fileName);
+  int fromPos = findColPos(colHeaders, "_from", e.fileName);
+  int toPos = findColPos(colHeaders, "_to", e.fileName);
   if (fromPos < 0 || toPos < 0) {
-    return;
+    return 2;
   }
-  // We tolerate -1 for the key pos!
+  // We tolerate -1 for the key pos, in which case we do not touch it!
 
   size_t count = 0;
 
@@ -238,29 +264,20 @@ void transformEdgesCSV(Translation& translation, std::string const& vcolname,
       parts.emplace_back("");
     }
 
-    auto translate = [&](int pos, std::string const& name) -> std::string {
-      std::string found = parts[pos];
-      bool quoted = false;
-      if (found.size() > 1 && found[0] == quo &&
-          found[found.size() - 1] == quo) {
-        quoted = true;
-        found = found.substr(1, found.size() - 2);
-      }
+    auto translate = [&](int pos, std::string const& name,
+                         std::string const& vertexCollDefault) -> std::string {
+      std::string found = unquote(parts[pos], quo);
       size_t slashpos = found.find('/');
       if (slashpos == std::string::npos) {
-        // Only work if there is a slash, otherwise do not translate
-        std::cerr << "Warning: found " << name << " without a slash:\n"
-                  << line << "\n";
-        return "";
+        // Prepend the default vertex collection name:
+        found = vertexCollDefault + "/" + found;
+        parts[pos] = quote(found, quo);
+        slashpos = vertexCollDefault.size();
       }
       size_t colPos = found.find(':', slashpos + 1);
       if (colPos != std::string::npos) {
         // already transformed
         return found.substr(slashpos + 1, colPos - slashpos - 1);
-      }
-      if (found.compare(0, slashpos, vcolname) != 0) {
-        // Only work if the collection name matches the vertex collection name
-        return "";
       }
       std::string key = found.substr(slashpos + 1);
       auto it = translation.keyTab.find(key);
@@ -268,36 +285,23 @@ void transformEdgesCSV(Translation& translation, std::string const& vcolname,
         // Did not find key, simply go on
         return "";
       }
-      if (quoted) {
-        parts[pos] = quo + found.substr(0, slashpos + 1) +
-                     translation.smartAttributes[it->second] + ":" + key + quo;
-      } else {
-        parts[pos] = found.substr(0, slashpos + 1) +
-                     translation.smartAttributes[it->second] + ":" + key;
-      }
+      parts[pos] =
+          quote(found.substr(0, slashpos + 1) +
+                    translation.smartAttributes[it->second] + ":" + key,
+                quo);
       return translation.smartAttributes[it->second];
     };
 
-    std::string fromAttr = translate(fromPos, "_from");
-    std::string toAttr = translate(toPos, "_to");
+    std::string fromAttr = translate(fromPos, "_from", e.fromVertColl);
+    std::string toAttr = translate(toPos, "_to", e.toVertColl);
 
     if (keyPos >= 0 && !fromAttr.empty() && !toAttr.empty()) {
       // See if we have to translate _key as well:
-      std::string found = parts[keyPos];
-      bool quoted = false;
-      if (found.size() > 1 && found[0] == quo &&
-          found[found.size() - 1] == quo) {
-        quoted = true;
-        found = found.substr(1, found.size() - 2);
-      }
+      std::string found = unquote(parts[keyPos], quo);
       size_t colPos1 = found.find(':');
       if (colPos1 == std::string::npos) {
         // both positions found, need to add both attributes:
-        if (quoted) {
-          parts[keyPos] = quo + fromAttr + ":" + found + ":" + toAttr + quo;
-        } else {
-          parts[keyPos] = fromAttr + ":" + found + ":" + toAttr;
-        }
+        parts[keyPos] = quote(fromAttr + ":" + found + ":" + toAttr, quo);
       }
     }
 
@@ -311,25 +315,26 @@ void transformEdgesCSV(Translation& translation, std::string const& vcolname,
     ++count;
 
     if (count % 1000000 == 0) {
-      std::cout << "Have transformed " << count << " edges in " << ename
+      std::cout << "Have transformed " << count << " edges in " << e.fileName
                 << "..." << std::endl;
     }
   }
 
-  std::cout << "Have transformed " << count << " edges in " << ename
+  std::cout << "Have transformed " << count << " edges in " << e.fileName
             << ", finished." << std::endl;
 
   ein.close();
   eout.close();
 
   if (!eout.good()) {
-    std::cerr << "An error happened at close time for " << ename + ".out"
+    std::cerr << "An error happened at close time for " << e.fileName + ".out"
               << ", not renaming to the original name." << std::endl;
-    return;
+    return 4;
   }
 
-  ::unlink(ename.c_str());
-  ::rename((ename + ".out").c_str(), ename.c_str());
+  ::unlink(e.fileName.c_str());
+  ::rename((e.fileName + ".out").c_str(), e.fileName.c_str());
+  return 0;
 }
 
 void transformEdgesJSONL(Translation& translation, std::string const& vcolname,
@@ -778,10 +783,45 @@ void doVertices(Options const& options) {
   }
 }
 
+void learnLineCSV(Translation& trans, std::string const& line, char sep,
+                  char quo, int keyPos, std::string const& vertexCollName) {
+  std::vector<std::string> parts = split(line, sep, quo);
+  std::string key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+  size_t splitPos = key.find(':');
+  if (splitPos != std::string::npos) {
+    // Before the colon is the smart graph attribute, after the colon there is
+    // the unique key
+    std::string uniq = key.substr(splitPos + 1);
+    std::string att = key.substr(0, splitPos);
+    auto it = trans.attTab.find(att);
+    uint32_t pos;
+    if (it == trans.attTab.end()) {
+      trans.smartAttributes.emplace_back(att);
+      pos = static_cast<uint32_t>(trans.smartAttributes.size() - 1);
+      trans.attTab.insert(std::make_pair(att, pos));
+      trans.memUsage += sizeof(std::pair<std::string, uint32_t>)  // attTab
+                        + att.size() + 1       // actual string
+                        + sizeof(std::string)  // smartAttributes
+                        + att.size() + 1;      // actual string
+    } else {
+      pos = it->second;
+    }
+    auto it2 = trans.keyTab.find(uniq);
+    if (it2 == trans.keyTab.end()) {
+      trans.keyTab.insert(std::make_pair(uniq, pos));
+      trans.memUsage += sizeof(std::pair<std::string, uint32_t>)  // keyTab
+                        + uniq.size() + 1;  // actual string
+    }
+  }
+}
+
+void learnLineJSONL(Translation& trans, std::string const& line,
+                    std::string const& vertexCollName) {}
+
 struct VertexBuffer {
  public:
-  std::vector<std::string> _vertexFiles;
   std::vector<std::string> _vertexCollNames;
+  std::vector<std::string> _vertexFiles;
 
  private:
   Translation _trans;
@@ -789,14 +829,102 @@ struct VertexBuffer {
   std::ifstream _currentInput;
   bool _fileOpen;
   DataType _type;
+  int _keyPos;
+  char _separator;
+  char _quoteChar;
 
-  VertexBuffer(DataType type) : _filePos(0), _fileOpen(false), _type(type) {}
+ public:
+  VertexBuffer(DataType type, char separator, char quoteChar)
+      : _filePos(0),
+        _fileOpen(false),
+        _type(type),
+        _keyPos(0),
+        _separator(separator),
+        _quoteChar(quoteChar) {}
+
   bool isDone() { return _filePos >= _vertexFiles.size(); }
-  void readMore() {}
+
+  int readMore(size_t memLimit) {
+    std::string line;
+    _trans.clear();
+    while (_filePos < _vertexFiles.size()) {
+      if (_trans.memUsage >= memLimit) {
+        return 0;
+      }
+      if (!_fileOpen) {
+        _currentInput.open(_vertexFiles[_filePos].c_str(), std::ios::in);
+        if (_currentInput.good()) {
+          _fileOpen = true;
+        } else {
+          std::cerr << "Could not open file " << _vertexFiles[_filePos]
+                    << " for reading." << std::endl;
+          return 1;
+        }
+        if (_type == CSV) {
+          // Read header:
+          if (!getline(_currentInput, line)) {
+            std::cerr << "Could not read header line in vertex file "
+                      << _vertexFiles[_filePos] << ", giving up." << std::endl;
+            return 2;
+          }
+          std::vector<std::string> colHeaders =
+              split(line, _separator, _quoteChar);
+          for (auto& s : colHeaders) {
+            s = unquote(s, _quoteChar);
+          }
+
+          _keyPos = findColPos(colHeaders, "_key", _vertexFiles[_filePos]);
+          if (_keyPos < 0) {
+            return 3;
+          }
+        } else {
+          // JSONL case
+          // ...
+        }
+      }
+      if (!getline(_currentInput, line)) {
+        _currentInput.close();
+        ++_filePos;
+        continue;
+      }
+      if (_type == CSV) {
+        learnLineCSV(_trans, line, _separator, _quoteChar, _keyPos,
+                     _vertexCollNames[_filePos]);
+      } else {
+        learnLineJSONL(_trans, line, _vertexCollNames[_filePos]);
+      }
+    }
+    return 0;
+  }
+
+  Translation& translation() { return _trans; }
 };
 
 void doEdges(Options const& options) {
   // Check options, find vertex colls and edge colls
+  DataType type = CSV;
+  auto it = options.find("--type");
+  if (it != options.end()) {
+    if (it->second[0] == "jsonl" || it->second[0] == "JSONL") {
+      type = JSONL;
+    }
+  }
+  char sep = ',';
+  it = options.find("--separator");
+  if (it != options.end() && !it->second[0].empty()) {
+    sep = it->second[0][0];
+  }
+  char quo;
+  it = options.find("--quote-char");
+  if (it != options.end() && !it->second[0].empty()) {
+    quo = it->second[0][0];
+  }
+
+  it = options.find("--memory");
+  assert(it != options.end());  // there is a default
+  size_t memLimit =
+      strtoul(it->second[0].c_str(), nullptr, 10) * 1024 * 1024;  // in MBs
+
   // Set up translator and set up vertex reader object
   // while vertex reader object not done
   //   run through all edge collections, one at a time
@@ -804,6 +932,81 @@ void doEdges(Options const& options) {
   //     move tmp file to original file
   //   forget all vertex data
   //   read more vertex data
+  VertexBuffer vertexBuffer(type, sep, quo);
+
+  // Add vertex collections:
+  it = options.find("--vertices");
+  if (it == options.end()) {
+    std::cerr << "Need at least one vertex collection with the `--vertices` "
+                 "option. Giving up."
+              << std::endl;
+    return;
+  }
+  for (auto const& s : it->second) {
+    auto pos = s.find(":");
+    if (pos == std::string::npos) {
+      std::cerr << "Value for `--vertices` option needs to be of the form "
+                   "<collname>:<collfile>, but is: "
+                << s << " Giving up." << std::endl;
+      return;
+    }
+    vertexBuffer._vertexCollNames.push_back(s.substr(0, pos));
+    vertexBuffer._vertexFiles.push_back(s.substr(pos + 1));
+  }
+
+  // Get the edge collections data:
+  std::vector<EdgeCollection> edgeCollections;
+  it = options.find("--edges");
+  if (it == options.end()) {
+    std::cerr << "Need at least one edge collection with the `--edges` "
+                 "option. Giving up."
+              << std::endl;
+    return;
+  }
+  for (auto const& e : it->second) {
+    auto pos = e.find(':');
+    if (pos == std::string::npos) {
+      std::cerr << "Value for `--edges` option needs to be of the form "
+                   "<edgefilename>:<vertcollname>:<vertcollname>, but is: "
+                << e << " Giving up." << std::endl;
+      return;
+    }
+    auto pos2 = e.find(':', pos + 1);
+    if (pos2 == std::string::npos) {
+      std::cerr << "Value for `--edges` option needs to be of the form "
+                   "<edgefilename>:<vertcollname>:<vertcollname>, but is: "
+                << e << " Giving up." << std::endl;
+      return;
+    }
+    auto pos3 = e.find(':', pos2 + 1);
+    std::vector<std::pair<int, std::string>> renames;
+    if (pos3 != std::string::npos) {
+      // Need to read column renames:
+      std::string renamest = e.substr(pos3 + 1);
+      auto parts = split(renamest, ':', '"');
+      for (size_t i = 0; i + 1 < parts.size(); i += 2) {
+        int nr = strtoul(parts[i].c_str(), nullptr, 10);
+        renames.emplace_back(std::make_pair(nr, parts[i + 1]));
+      }
+    } else {
+      pos3 = e.size();
+    }
+    edgeCollections.push_back(
+        EdgeCollection{.fileName = e.substr(0, pos),
+                       .fromVertColl = e.substr(pos + 1, pos2 - pos - 1),
+                       .toVertColl = e.substr(pos2 + 1, pos3 - pos2 - 1),
+                       .columnRenames = std::move(renames)});
+  }
+
+  // Main work:
+  while (!vertexBuffer.isDone()) {
+    vertexBuffer.readMore(memLimit);
+    for (auto const& e : edgeCollections) {
+      if (transformEdgesCSV(vertexBuffer.translation(), e, sep, quo) != 0) {
+        return;
+      }
+    }
+  }
 }
 
 #define MYASSERT(t)                                         \
@@ -881,117 +1084,4 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
-
-#if 0
-int main2(int argc, char* argv[]) {
-  std::map<std::string, docopt::value> args =
-      docopt::docopt(USAGE, {argv + 1, argv + argc},
-                     true,  // show help if requested
-                     "smartifier V" GRAPHUTILS_VERSION_MAJOR
-                     "." GRAPHUTILS_VERSION_MINOR);  // version string
-
-  std::string vname = args["<vertexFile>"].asString();
-  std::string vcolname = args["<vertexColl>"].asString();
-  std::string ename = args["<edgeFile>"].asString();
-  std::string smartAttr = args["<smartGraphAttr>"].asString();
-  std::string smartDefault;
-  if (args["--smartDefault"]) {
-    smartDefault = args["--smartDefault"].asString();
-  }
-  size_t memMB = args["--memory"].asLong();
-  char sep = args["--separator"].asString()[0];
-  char quo = args["--quoteChar"].asString()[0];
-  DataType type = CSV;
-  if (args["--type"].asString() == "jsonl") {
-    type = JSONL;
-  }
-
-  std::fstream vin(vname, std::ios_base::in);
-  std::string line;
-
-  // Prepare output file for vertices:
-  std::fstream vout(vname + ".out", std::ios_base::out);
-
-  size_t ncols = 0;
-  int smartAttrPos = 0;
-  int keyPos = 0;
-  if (type == CSV) {
-    // First get the header line:
-    if (!getline(vin, line)) {
-      std::cerr << "Could not read header line in vertex file " << vname
-                << std::endl;
-      return 1;
-    }
-    std::vector<std::string> colHeaders = split(line, sep, quo);
-    for (auto& s : colHeaders) {
-      if (s.size() >= 2 && s[0] == quo && s[s.size() - 1] == quo) {
-        s = s.substr(1, s.size() - 2);
-      }
-    }
-    ncols = colHeaders.size();
-
-    smartAttrPos = findColPos(colHeaders, smartAttr, vname);
-    if (smartAttrPos < 0) {
-      return 2;
-    }
-
-    keyPos = findColPos(colHeaders, "_key", vname);
-    if (keyPos < 0) {
-      return 3;
-    }
-
-    // Write out header:
-    vout << line << "\n";
-  }
-
-  bool done = false;
-  size_t count = 0;
-  while (!done) {
-    // We do one batch of vertices in one run of this loop
-    Translation translation;
-    while (!done && translation.memUsage < memMB * 1024 * 1024) {
-      if (!getline(vin, line)) {
-        done = true;
-        break;
-      }
-      if (type == CSV) {
-        transformVertexCSV(line, sep, quo, ncols, smartAttrPos, keyPos,
-                           translation, vout);
-      } else {
-        transformVertexJSONL(line, smartAttr, translation, vout, smartDefault);
-      }
-
-      ++count;
-
-      if (count % 1000000 == 0) {
-        std::cout << "Have transformed " << count << " vertices, memory: "
-                  << translation.memUsage / (1024 * 1024) << " MB ..."
-                  << std::endl;
-      }
-    }
-    if (count % 1000000 != 0) {
-      std::cout << "Have transformed " << count
-                << " vertices, memory: " << translation.memUsage / (1024 * 1024)
-                << " MB ..." << std::endl;
-    }
-    if (type == CSV) {
-      transformEdgesCSV(translation, vcolname, ename, sep, quo);
-    } else {
-      transformEdgesJSONL(translation, vcolname, ename);
-    }
-  }
-
-  vout.close();
-
-  if (!vout.good()) {
-    std::cerr << "An error happened at close time for " << vname + ".out"
-              << ", not renaming to the original name." << std::endl;
-    return 5;
-  }
-
-  ::unlink(vname.c_str());
-  ::rename((vname + ".out").c_str(), vname.c_str());
-  return 0;
-}
-#endif
 
