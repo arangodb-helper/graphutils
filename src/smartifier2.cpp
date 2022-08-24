@@ -38,6 +38,7 @@ static const char USAGE[] =
                            [ --quote-char <quotechar> ]
                            [ --smart-default <smartdefault> ]
                            [ --randomize-smart <nr> ]
+                           [ --rename-column <nr>:<newname> ... ]
       smartifier2 edges --vertices <vertices>... 
                         --edges <edges>...
                         [ --from-attribute <fromattribute> ]
@@ -46,6 +47,7 @@ static const char USAGE[] =
                         [ --memory <memory> ]
                         [ --separator <separator> ]
                         [ --quote-char <quotechar> ]
+                        [ --rename-column <nr>:<newname> ... ]
 
     Options:
       --help (-h)                   Show this screen.
@@ -71,6 +73,10 @@ static const char USAGE[] =
       --randomize-smart <nr>        If given, random values are taken randomly from
                                     0 .. <nr> - 1 as smart graph attribute value,
                                     unless the attribute is already there.
+      --rename-column <nr>:<newname>  Before processing starts, rename column
+                                    number <nr> to <newname>, only relevant for
+                                    CSV, can be used multiple times, <nr> is
+                                    0-based.
 
     And additionally for edge mode:
 
@@ -517,6 +523,34 @@ void transformVertexCSV(std::string const& line, uint64_t count, char sep,
   vout << '\n';
 }
 
+std::string smartToString(VPackSlice attSlice, std::string const& smartDefault,
+                          size_t count) {
+  if (attSlice.isString()) {
+    return attSlice.copyString();
+  } else if (attSlice.isNone()) {
+    if (!smartDefault.empty()) {
+      return smartDefault;
+    }
+  } else {
+    std::cerr << "WARNING: Vertex with non-string smart graph attribute:\n"
+              << count << ".\n";
+    switch (attSlice.type()) {
+      case VPackValueType::Bool:
+      case VPackValueType::Double:
+      case VPackValueType::UTCDate:
+      case VPackValueType::Int:
+      case VPackValueType::UInt:
+      case VPackValueType::SmallInt:
+        return attSlice.toString();
+        std::cerr << "WARNING: Converted to String.\n";
+        break;
+      default:
+        std::cerr << "ERROR: Found a complextype, will not convert it.\n";
+    }
+  }
+  return "";
+}
+
 void transformVertexJSONL(std::string const& line, size_t count,
                           std::string const& smartAttr, std::string smartValue,
                           int smartIndex, std::string const& smartDefault,
@@ -525,105 +559,300 @@ void transformVertexJSONL(std::string const& line, size_t count,
   std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
   VPackSlice s = b->slice();
 
+  // First derive the smart graph attribute value:
+  std::string att;
+  if (!smartValue.empty()) {
+    VPackSlice valSlice = s.get(smartValue);
+    att = smartToString(valSlice, smartDefault, count);
+    if (smartIndex > 0) {
+      att = att.substr(0, smartIndex);
+    }
+  }
+
+  if (att.empty()) {
+    // Need to lookup smart graph attribute itself:
+    VPackSlice attSlice = s.get(smartAttr);
+    att = smartToString(attSlice, smartDefault, count);
+  }
+
+  // Now consider the _key:
   VPackSlice keySlice = s.get("_key");
   if (!keySlice.isString()) {
     vout << line << "\n";
+    return;
+  }
+
+  std::string key = keySlice.copyString();
+  std::string newKey;
+  size_t splitPos = key.find(':');
+  uint32_t pos = 0;
+  if (splitPos != std::string::npos) {
+    newKey = key;
+    if (att != key.substr(0, splitPos)) {
+      std::cerr << "_key is already smart, but with the wrong smart graph "
+                   "attribute:\n"
+                << line << "\n";
+      vout << line << "\n";
+      return;
+    }
   } else {
-    std::string key = keySlice.copyString();
-    std::string newKey;
-    std::string att;
-    size_t splitPos = key.find(':');
-    uint32_t pos = 0;
-    if (splitPos != std::string::npos) {
-      newKey = key;
-      att = key.substr(0, splitPos);
-      key.erase(0, splitPos + 1);
+    if (!att.empty()) {
+      newKey = att + ":" + key;
     } else {
-      // Need to transform key, where is the smart graph attribute?
-      if (!smartValue.empty()) {
-        VPackSlice valSlice = s.get(smartValue);
-        if (valSlice.isString()) {
-          std::string att = valSlice.copyString();
-          if (smartIndex > 0) {
-            att = att.substr(0, smartIndex);
-          }
-        }
-      }
-      VPackSlice attSlice = s.get(smartAttr);
-      if (attSlice.isString()) {
-        att = attSlice.copyString();
-        // Put the smart graph attribute into a prefix of the key:
-        newKey = att + ":" + key;
-      } else if (attSlice.isNone()) {
-        if (!smartDefault.empty()) {
-          att = smartDefault;
-          newKey = att + ":" + key;
-        } else {
-          newKey = key;
-        }
-      } else {
-        std::cerr << "WARNING: Vertex with non-string smart graph attribute:\n"
-                  << line << ".\n";
-        switch (attSlice.type()) {
-          case VPackValueType::Bool:
-          case VPackValueType::Double:
-          case VPackValueType::UTCDate:
-          case VPackValueType::Int:
-          case VPackValueType::UInt:
-          case VPackValueType::SmallInt:
-            att = attSlice.toString();
-            newKey = att + ":" + key;
-            std::cerr << "WARNING: Converted to String.\n";
-            break;
-          default:
-            newKey = key;
-            std::cerr << "ERROR: Found a complextype, will not convert it.\n";
+      newKey = key;
+    }
+  }
+
+  // Write out the potentially modified line:
+  vout << R"({"_key":")" << newKey << R"(",")" << smartAttr << R"(":")" << att
+       << '"';
+  for (auto const& p : VPackObjectIterator(s)) {
+    std::string attrName = p.key.copyString();
+    if (attrName != "_key" && attrName != smartAttr) {
+      vout << ",\"" << attrName << "\":" << p.value.toJson();
+    }
+  }
+  vout << "}\n";
+}
+
+void renameColumns(Options const& options,
+                   std::vector<std::string>& colHeaders) {
+  auto it = options.find("--rename-column");
+  if (it != options.end()) {
+    for (auto const& s : it->second) {
+      auto pos = s.find(':');
+      if (pos != std::string::npos) {
+        size_t nr = strtoul(s.substr(0, pos).c_str(), nullptr, 10);
+        if (nr < colHeaders.size() && pos + 1 < s.size()) {
+          colHeaders[nr] = s.substr(pos + 1);
         }
       }
     }
-    if (!att.empty()) {
-#if 0
-      auto it = translation.attTab.find(att);
-      if (it == translation.attTab.end()) {
-        translation.smartAttributes.emplace_back(att);
-        pos = static_cast<uint32_t>(translation.smartAttributes.size() - 1);
-        translation.attTab.insert(std::make_pair(att, pos));
-        translation.memUsage +=
-            sizeof(std::pair<std::string, uint32_t>)  // attTab
-            + att.size() + 1                          // actual string
-            + sizeof(std::string)                     // smartAttributes
-            + att.size() + 1;                         // actual string
-      } else {
-        pos = it->second;
-      }
-      it = translation.keyTab.find(key);
-      if (it == translation.keyTab.end()) {
-        translation.keyTab.insert(std::make_pair(key, pos));
-        translation.memUsage +=
-            sizeof(std::pair<std::string, uint32_t>) + key.size() + 1;
-        // keyTab and actual string
-      }
-#endif
+  }
+}
+
+void doVertices(Options const& options) {
+  auto input = getOption(options, "--input");
+  if (!input) {
+    std::cerr << "Need input file with --input option, giving up." << std::endl;
+    return;
+  }
+  auto output = getOption(options, "--output");
+  if (!output) {
+    std::cerr << "Need output file with --output option, giving up."
+              << std::endl;
+    return;
+  }
+  std::string inputFile = (*input.value())[0];
+  std::string outputFile = (*output.value())[0];
+  std::string smartAttr =
+      (*getOption(options, "--smart-graph-attribute").value())[0];
+  bool haveSmartValue = false;
+  std::string smartValue;
+  int64_t smartIndex = -1;  // does not count
+  auto it = options.find("--smart-value");
+  if (it != options.end()) {
+    smartValue = it->second[0];
+    haveSmartValue = true;
+    it = options.find("--smart-index");
+    if (it != options.end()) {
+      smartIndex = strtol(it->second[0].c_str(), nullptr, 10);
+    }
+  }
+  DataType type = CSV;
+  it = options.find("--type");
+  if (it != options.end()) {
+    if (it->second[0] == "jsonl" || it->second[0] == "JSONL") {
+      type = JSONL;
+    }
+  }
+  char sep = ',';
+  it = options.find("--separator");
+  if (it != options.end() && !it->second[0].empty()) {
+    sep = it->second[0][0];
+  }
+  char quo;
+  it = options.find("--quote-char");
+  if (it != options.end() && !it->second[0].empty()) {
+    quo = it->second[0][0];
+  }
+
+  // Only for JSONL:
+  std::string smartDefault = "";
+
+  // Input file:
+  std::fstream vin(inputFile, std::ios_base::in);
+  std::string line;
+
+  // Prepare output file for vertices:
+  std::fstream vout(outputFile + ".out", std::ios_base::out);
+
+  size_t ncols = 0;
+  int smartAttrPos = -1;
+  int smartValuePos = -1;
+  int keyPos = -1;
+  if (type == CSV) {
+    // First get the header line:
+    if (!getline(vin, line)) {
+      std::cerr << "Could not read header line in vertex file " << inputFile
+                << std::endl;
+      return;
+    }
+    std::vector<std::string> colHeaders = split(line, sep, quo);
+    for (auto& s : colHeaders) {
+      s = unquote(s, quo);
+    }
+    ncols = colHeaders.size();
+
+    // Potentially rename columns:
+    renameColumns(options, colHeaders);
+
+    bool newSmartColumn = false;
+    smartAttrPos = findColPos(colHeaders, smartAttr, inputFile);
+    if (smartAttrPos < 0) {
+      smartAttrPos = colHeaders.size();
+      colHeaders.push_back(smartAttr);
+      newSmartColumn = true;
     }
 
-    // Write out the potentially modified line:
-    vout << R"({"_key":")" << newKey << "\"";
-    for (auto const& p : VPackObjectIterator(s)) {
-      std::string attrName = p.key.copyString();
-      if (attrName != "_key") {
-        if (attrName == smartAttr && !att.empty()) {
-          // We transformed the attribute to string, write it down
-          vout << ",\"" << attrName << "\":\"" << att << "\"";
-        } else {
-          vout << ",\"" << attrName << "\":" << p.value.toJson();
-        }
+    if (haveSmartValue) {
+      smartValuePos = findColPos(colHeaders, smartValue, inputFile);
+      if (smartValuePos < 0) {
+        std::cerr << "Warning: Could not find column for smart value. "
+                     "Ignoring..."
+                  << std::endl;
       }
     }
-    if (s.get(smartAttr).isNone() && !smartDefault.empty()) {
-      vout << ",\"" << smartAttr << "\":\"" << smartDefault << '"';
+
+    bool newKeyColumn = false;
+    keyPos = findColPos(colHeaders, "_key", inputFile);
+    if (keyPos < 0) {
+      keyPos = ncols;
+      colHeaders.push_back("_key");
+      newKeyColumn = true;
     }
-    vout << "}\n";
+
+    // Write out header:
+    vout << line;
+    bool first = true;
+    for (auto const& h : colHeaders) {
+      if (!first) {
+        vout << sep;
+      }
+      vout << quote(h, quo);
+    }
+    vout << "\n";
+  } else {
+    it = options.find("--smart-default");
+    if (it != options.end()) {
+      smartDefault = it->second[0];
+    }
   }
+
+  size_t count = 1;
+  while (true) {
+    if (!getline(vin, line)) {
+      break;
+    }
+    if (type == CSV) {
+      transformVertexCSV(line, count + 1, sep, quo, ncols, smartAttrPos,
+                         smartValuePos, smartIndex, keyPos, vout);
+    } else {
+      transformVertexJSONL(line, count, smartAttr, smartValue, smartIndex,
+                           smartDefault, vout);
+    }
+
+    ++count;
+
+    if (count % 1000000 == 0) {
+      std::cout << "Have transformed " << count << " vertices." << std::endl;
+    }
+  }
+
+  vout.close();
+
+  if (!vout.good()) {
+    std::cerr << "An error happened at close time for " << outputFile << "."
+              << std::endl;
+    return;
+  }
+}
+
+void doEdges(Options const& options) {}
+
+#define MYASSERT(t)                                         \
+  if (!(t)) {                                               \
+    std::cerr << "Error in line " << __LINE__ << std::endl; \
+  }
+
+void runTests() {
+  std::string s = quote("abc", '"');
+  MYASSERT(s == "abc");
+  s = quote("a\"b\"c", '"');
+  MYASSERT(s == "\"a\"\"b\"\"c\"");
+}
+
+int main(int argc, char* argv[]) {
+  OptionConfig optionConfig = {
+      {"--help", OptionConfigItem(ArgType::Bool, "false", "-h")},
+      {"--version", OptionConfigItem(ArgType::Bool, 0, "-v")},
+      {"--test", OptionConfigItem(ArgType::Bool, "false")},
+      {"--type", OptionConfigItem(ArgType::StringOnce, "csv", "-t")},
+      {"--input", OptionConfigItem(ArgType::StringOnce, 0, "-i")},
+      {"--output", OptionConfigItem(ArgType::StringOnce, 0, "-o")},
+      {"--smart-graph-attribute",
+       OptionConfigItem(ArgType::StringOnce, "smart_id", "-a")},
+      {"--memory", OptionConfigItem(ArgType::StringOnce, "4096", "-m")},
+      {"--separator", OptionConfigItem(ArgType::StringOnce, ",", "-s")},
+      {"--quote-char", OptionConfigItem(ArgType::StringOnce, "\"", "-q")},
+      {"--write-key", OptionConfigItem(ArgType::Bool, "true")},
+      {"--randomize-smart", OptionConfigItem(ArgType::Bool, "false")},
+      {"--smart-value", OptionConfigItem(ArgType::StringOnce)},
+      {"--from-attribute", OptionConfigItem(ArgType::StringOnce, "_from")},
+      {"--to-attribute", OptionConfigItem(ArgType::StringOnce, "_to")},
+      {"--vertices", OptionConfigItem(ArgType::StringMultiple)},
+      {"--edges", OptionConfigItem(ArgType::StringMultiple)},
+      {"--rename-column", OptionConfigItem(ArgType::StringMultiple)},
+      {"--smart-default", OptionConfigItem(ArgType::StringOnce)},
+  };
+
+  Options options;
+  std::vector<std::string> args;
+  if (parseCommandLineArgs(USAGE, optionConfig, argc, argv, options, args) !=
+      0) {
+    return -1;
+  }
+  auto it = options.find("--help");
+  if (it != options.end() && it->second[0] == "true") {
+    std::cout << USAGE << std::endl;
+    return 0;
+  }
+  it = options.find("--version");
+  if (it != options.end() && it->second[0] == "true") {
+    std::cout << "smartifier2: Version " GRAPHUTILS_VERSION_MAJOR
+                 "." GRAPHUTILS_VERSION_MINOR;  // version string
+    return 0;
+  }
+  it = options.find("--test");
+  if (it != options.end() && it->second[0] == "true") {
+    std::cout << "Running unit tests...\n";
+    runTests();
+    std::cout << "Done." << std::endl;
+    return 0;
+  }
+
+  if (args.size() != 1 || (args[0] != "vertices" && args[0] != "edges")) {
+    std::cerr << "Need exactly one subcommand 'vertices' or 'edges'.\n";
+    return -2;
+  }
+
+  if (args[0] == "vertices") {
+    doVertices(options);
+  } else if (args[0] == "edges") {
+    doEdges(options);
+  }
+
+  return 0;
 }
 
 #if 0
@@ -739,222 +968,3 @@ int main2(int argc, char* argv[]) {
 }
 #endif
 
-void doVertices(Options const& options) {
-  auto input = getOption(options, "--input");
-  if (!input) {
-    std::cerr << "Need input file with --input option, giving up." << std::endl;
-    return;
-  }
-  auto output = getOption(options, "--output");
-  if (!output) {
-    std::cerr << "Need output file with --output option, giving up."
-              << std::endl;
-    return;
-  }
-  std::string inputFile = (*input.value())[0];
-  std::string outputFile = (*output.value())[0];
-  std::string smartAttr =
-      (*getOption(options, "--smart-graph-attribute").value())[0];
-  bool haveSmartValue = false;
-  std::string smartValue;
-  int64_t smartIndex = -1;  // does not count
-  auto it = options.find("--smart-value");
-  if (it != options.end()) {
-    smartValue = it->second[0];
-    haveSmartValue = true;
-    it = options.find("--smart-index");
-    if (it != options.end()) {
-      smartIndex = strtol(it->second[0].c_str(), nullptr, 10);
-    }
-  }
-  DataType type = CSV;
-  it = options.find("--type");
-  if (it != options.end()) {
-    if (it->second[0] == "jsonl" || it->second[0] == "JSONL") {
-      type = JSONL;
-    }
-  }
-  char sep = ',';
-  it = options.find("--separator");
-  if (it != options.end() && !it->second[0].empty()) {
-    sep = it->second[0][0];
-  }
-  char quo;
-  it = options.find("--quote-char");
-  if (it != options.end() && !it->second[0].empty()) {
-    quo = it->second[0][0];
-  }
-
-  // Only for JSONL:
-  std::string smartDefault = "";
-
-  // Input file:
-  std::fstream vin(inputFile, std::ios_base::in);
-  std::string line;
-
-  // Prepare output file for vertices:
-  std::fstream vout(outputFile + ".out", std::ios_base::out);
-
-  size_t ncols = 0;
-  int smartAttrPos = -1;
-  int smartValuePos = -1;
-  int keyPos = -1;
-  if (type == CSV) {
-    // First get the header line:
-    if (!getline(vin, line)) {
-      std::cerr << "Could not read header line in vertex file " << inputFile
-                << std::endl;
-      return;
-    }
-    std::vector<std::string> colHeaders = split(line, sep, quo);
-    for (auto& s : colHeaders) {
-      if (s.size() >= 2 && s[0] == quo && s[s.size() - 1] == quo) {
-        s = s.substr(1, s.size() - 2);
-      }
-    }
-    ncols = colHeaders.size();
-
-    bool newSmartColumn = false;
-    smartAttrPos = findColPos(colHeaders, smartAttr, inputFile);
-    if (smartAttrPos < 0) {
-      smartAttrPos = colHeaders.size();
-      colHeaders.push_back(smartAttr);
-      newSmartColumn = true;
-    }
-
-    if (haveSmartValue) {
-      smartValuePos = findColPos(colHeaders, smartValue, inputFile);
-      if (smartValuePos < 0) {
-        std::cerr << "Warning: Could not find column for smart value. "
-                     "Ignoring..."
-                  << std::endl;
-      }
-    }
-
-    bool newKeyColumn = false;
-    keyPos = findColPos(colHeaders, "_key", inputFile);
-    if (keyPos < 0) {
-      keyPos = ncols;
-      colHeaders.push_back("_key");
-      newKeyColumn = true;
-    }
-
-    // Write out header:
-    vout << line;
-    if (newSmartColumn) {
-      vout << sep << smartAttr;
-    }
-    if (newKeyColumn) {
-      vout << sep << "_key";
-    }
-    vout << "\n";
-  } else {
-    it = options.find("--smart-default");
-    if (it != options.end()) {
-      smartDefault = it->second[0];
-    }
-  }
-
-  size_t count = 1;
-  while (true) {
-    if (!getline(vin, line)) {
-      break;
-    }
-    if (type == CSV) {
-      transformVertexCSV(line, count + 1, sep, quo, ncols, smartAttrPos,
-                         smartValuePos, smartIndex, keyPos, vout);
-    } else {
-      transformVertexJSONL(line, count, smartAttr, smartValue, smartIndex,
-                           smartDefault, vout);
-    }
-
-    ++count;
-
-    if (count % 1000000 == 0) {
-      std::cout << "Have transformed " << count << " vertices." << std::endl;
-    }
-  }
-
-  vout.close();
-
-  if (!vout.good()) {
-    std::cerr << "An error happened at close time for " << outputFile << "."
-              << std::endl;
-    return;
-  }
-}
-
-void doEdges(Options const& options) {}
-
-#define MYASSERT(t)                                         \
-  if (!(t)) {                                               \
-    std::cerr << "Error in line " << __LINE__ << std::endl; \
-  }
-
-void runTests() {
-  std::string s = quote("abc", '"');
-  MYASSERT(s == "abc");
-  s = quote("a\"b\"c", '"');
-  MYASSERT(s == "\"a\"\"b\"\"c\"");
-}
-
-int main(int argc, char* argv[]) {
-  OptionConfig optionConfig = {
-      {"--help", OptionConfigItem(ArgType::Bool, "false", "-h")},
-      {"--version", OptionConfigItem(ArgType::Bool, 0, "-v")},
-      {"--test", OptionConfigItem(ArgType::Bool, "false")},
-      {"--type", OptionConfigItem(ArgType::StringOnce, "csv", "-t")},
-      {"--input", OptionConfigItem(ArgType::StringOnce, 0, "-i")},
-      {"--output", OptionConfigItem(ArgType::StringOnce, 0, "-o")},
-      {"--smart-graph-attribute",
-       OptionConfigItem(ArgType::StringOnce, "smart_id", "-a")},
-      {"--memory", OptionConfigItem(ArgType::StringOnce, "4096", "-m")},
-      {"--separator", OptionConfigItem(ArgType::StringOnce, ",", "-s")},
-      {"--quote-char", OptionConfigItem(ArgType::StringOnce, "\"", "-q")},
-      {"--write-key", OptionConfigItem(ArgType::Bool, "true")},
-      {"--randomize-smart", OptionConfigItem(ArgType::Bool, "false")},
-      {"--smart-value", OptionConfigItem(ArgType::StringOnce)},
-      {"--from-attribute", OptionConfigItem(ArgType::StringOnce, "_from")},
-      {"--to-attribute", OptionConfigItem(ArgType::StringOnce, "_to")},
-      {"--vertices", OptionConfigItem(ArgType::StringMultiple)},
-      {"--edges", OptionConfigItem(ArgType::StringMultiple)},
-  };
-
-  Options options;
-  std::vector<std::string> args;
-  if (parseCommandLineArgs(USAGE, optionConfig, argc, argv, options, args) !=
-      0) {
-    return -1;
-  }
-  auto it = options.find("--help");
-  if (it != options.end() && it->second[0] == "true") {
-    std::cout << USAGE << std::endl;
-    return 0;
-  }
-  it = options.find("--version");
-  if (it != options.end() && it->second[0] == "true") {
-    std::cout << "smartifier2: Version " GRAPHUTILS_VERSION_MAJOR
-                 "." GRAPHUTILS_VERSION_MINOR;  // version string
-    return 0;
-  }
-  it = options.find("--test");
-  if (it != options.end() && it->second[0] == "true") {
-    std::cout << "Running unit tests...\n";
-    runTests();
-    std::cout << "Done." << std::endl;
-    return 0;
-  }
-
-  if (args.size() != 1 || (args[0] != "vertices" && args[0] != "edges")) {
-    std::cerr << "Need exactly one subcommand 'vertices' or 'edges'.\n";
-    return -2;
-  }
-
-  if (args[0] == "vertices") {
-    doVertices(options);
-  } else if (args[0] == "edges") {
-    doEdges(options);
-  }
-
-  return 0;
-}
