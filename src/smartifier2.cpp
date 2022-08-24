@@ -685,7 +685,7 @@ void doVertices(Options const& options) {
   std::string line;
 
   // Prepare output file for vertices:
-  std::fstream vout(outputFile + ".out", std::ios_base::out);
+  std::fstream vout(outputFile, std::ios_base::out);
 
   size_t ncols = 0;
   int smartAttrPos = -1;
@@ -733,13 +733,13 @@ void doVertices(Options const& options) {
     }
 
     // Write out header:
-    vout << line;
     bool first = true;
     for (auto const& h : colHeaders) {
       if (!first) {
         vout << sep;
       }
       vout << quote(h, quo);
+      first = false;
     }
     vout << "\n";
   } else {
