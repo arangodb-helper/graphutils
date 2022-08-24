@@ -88,13 +88,6 @@ static const char USAGE[] =
 
 enum DataType { CSV = 0, JSONL = 1 };
 
-struct Translation {
-  std::unordered_map<std::string, uint32_t> keyTab;
-  std::unordered_map<std::string, uint32_t> attTab;
-  std::vector<std::string> smartAttributes;
-  size_t memUsage = 0;  // strings in map plus table size
-};
-
 std::vector<std::string> split(std::string const& line, char sep, char quo) {
   size_t start = 0;
   size_t pos = 0;
@@ -195,6 +188,13 @@ int findColPos(std::vector<std::string> const& colHeaders,
   }
   return static_cast<int>(it - colHeaders.begin());
 }
+
+struct Translation {
+  std::unordered_map<std::string, uint32_t> keyTab;
+  std::unordered_map<std::string, uint32_t> attTab;
+  std::vector<std::string> smartAttributes;
+  size_t memUsage = 0;  // strings in map plus table size
+};
 
 void transformEdgesCSV(Translation& translation, std::string const& vcolname,
                        std::string const& ename, char sep, char quo) {
@@ -479,10 +479,10 @@ void transformVertexCSV(std::string const& line, uint64_t count, char sep,
   while (parts.size() < ncols) {
     parts.emplace_back("");
   }
-  if (smartAttrPos > ncols) {
+  if (smartAttrPos >= ncols) {
     parts.emplace_back("");
   }
-  if (keyPos > ncols) {
+  if (keyPos >= ncols) {
     parts.emplace_back("");
   }
 
@@ -778,7 +778,33 @@ void doVertices(Options const& options) {
   }
 }
 
-void doEdges(Options const& options) {}
+struct VertexBuffer {
+ public:
+  std::vector<std::string> _vertexFiles;
+  std::vector<std::string> _vertexCollNames;
+
+ private:
+  Translation _trans;
+  size_t _filePos;
+  std::ifstream _currentInput;
+  bool _fileOpen;
+  DataType _type;
+
+  VertexBuffer(DataType type) : _filePos(0), _fileOpen(false), _type(type) {}
+  bool isDone() { return _filePos >= _vertexFiles.size(); }
+  void readMore() {}
+};
+
+void doEdges(Options const& options) {
+  // Check options, find vertex colls and edge colls
+  // Set up translator and set up vertex reader object
+  // while vertex reader object not done
+  //   run through all edge collections, one at a time
+  //     transform what can be done, write to tmp file
+  //     move tmp file to original file
+  //   forget all vertex data
+  //   read more vertex data
+}
 
 #define MYASSERT(t)                                         \
   if (!(t)) {                                               \
