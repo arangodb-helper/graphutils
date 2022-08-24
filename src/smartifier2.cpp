@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -21,6 +22,14 @@
 #include "velocypack/Slice.h"
 #include "velocypack/ValueType.h"
 #include "velocypack/velocypack-aliases.h"
+
+std::chrono::steady_clock::time_point startTime;
+
+double elapsed() {
+  auto now = std::chrono::steady_clock::now();
+  auto diff = now - startTime;
+  return diff.count() / 1e9;
+}
 
 static const char USAGE[] =
     R"(Smartifier2 - transform graph data into smart graph format
@@ -832,6 +841,7 @@ struct VertexBuffer {
   int _keyPos;
   char _separator;
   char _quoteChar;
+  uint64_t _count;
 
  public:
   VertexBuffer(DataType type, char separator, char quoteChar)
@@ -840,19 +850,27 @@ struct VertexBuffer {
         _type(type),
         _keyPos(0),
         _separator(separator),
-        _quoteChar(quoteChar) {}
+        _quoteChar(quoteChar),
+        _count(0) {}
 
   bool isDone() { return _filePos >= _vertexFiles.size(); }
 
   int readMore(size_t memLimit) {
+    std::cout << elapsed() << " Reading vertices..." << std::endl;
     std::string line;
     _trans.clear();
     while (_filePos < _vertexFiles.size()) {
       if (_trans.memUsage >= memLimit) {
+        std::cout << elapsed() << " Have read "
+                  << _trans.memUsage / (1024 * 1024) << " MB of vertex data."
+                  << std::endl;
         return 0;
       }
       if (!_fileOpen) {
+        std::cout << elapsed() << " Opening vertex file "
+                  << _vertexFiles[_filePos] << " ..." << std::endl;
         _currentInput.open(_vertexFiles[_filePos].c_str(), std::ios::in);
+        _count = 0;
         if (_currentInput.good()) {
           _fileOpen = true;
         } else {
@@ -887,13 +905,21 @@ struct VertexBuffer {
         ++_filePos;
         continue;
       }
+      ++_count;
       if (_type == CSV) {
         learnLineCSV(_trans, line, _separator, _quoteChar, _keyPos,
                      _vertexCollNames[_filePos]);
       } else {
         learnLineJSONL(_trans, line, _vertexCollNames[_filePos]);
       }
+      if (_count % 1000000 == 0) {
+        std::cout << elapsed() << " Have read " << _count << " vertices (needs "
+                  << _trans.memUsage / (1024 * 1024) << " MB of RAM)."
+                  << std::endl;
+      }
     }
+    std::cout << elapsed() << " Have read " << _trans.memUsage / (1024 * 1024)
+              << " MB of vertex data." << std::endl;
     return 0;
   }
 
@@ -1022,6 +1048,7 @@ void runTests() {
 }
 
 int main(int argc, char* argv[]) {
+  startTime = std::chrono::steady_clock::now();
   OptionConfig optionConfig = {
       {"--help", OptionConfigItem(ArgType::Bool, "false", "-h")},
       {"--version", OptionConfigItem(ArgType::Bool, 0, "-v")},
