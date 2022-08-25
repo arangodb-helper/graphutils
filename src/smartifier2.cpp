@@ -678,7 +678,7 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
     // Write out the potentially modified line:
     eout << parts[0];
     for (size_t i = 1; i < parts.size(); ++i) {
-      eout << ',' << parts[i];
+      eout << sep << parts[i];
     }
     eout << '\n';
 
