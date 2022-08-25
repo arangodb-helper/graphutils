@@ -1,0 +1,11 @@
+_key,_from,_to
+AU:1:CA,profiles/AU:4,profiles/CA:2
+MX:2:AU,profiles/MX:1,profiles/AU:4
+UK:3:AU,profiles/UK:9,profiles/AU:4
+DE:4:UK,profiles/DE:5,profiles/UK:3
+MX:5:CA,profiles/MX:1,profiles/CA:2
+AU:6:UK,profiles/AU:4,profiles/UK:9
+MX:7:UK,profiles/MX:7,profiles/UK:9
+CA:8:AU,profiles/CA:2,profiles/AU:4
+DE:9:DE,profiles/DE:5,profiles/DE:5
+US:10:MX,profiles/US:8,profiles/MX:7
