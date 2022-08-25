@@ -302,7 +302,7 @@ std::string smartToString(VPackSlice attSlice, std::string const& smartDefault,
 void transformVertexJSONL(std::string const& line, size_t count,
                           std::string const& smartAttr, std::string smartValue,
                           int smartIndex, std::string const& smartDefault,
-                          std::fstream& vout) {
+                          bool writeKey, std::fstream& vout) {
   // Parse line to VelocyPack:
   std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
   VPackSlice s = b->slice();
@@ -324,36 +324,34 @@ void transformVertexJSONL(std::string const& line, size_t count,
   }
 
   // Now consider the _key:
-  VPackSlice keySlice = s.get("_key");
-  if (!keySlice.isString()) {
-    vout << line << "\n";
-    return;
-  }
-
-  std::string key = keySlice.copyString();
   std::string newKey;
-  size_t splitPos = key.find(':');
-  uint32_t pos = 0;
-  if (splitPos != std::string::npos) {
-    newKey = key;
-    if (att != key.substr(0, splitPos)) {
-      std::cerr << "_key is already smart, but with the wrong smart graph "
-                   "attribute:\n"
-                << line << "\n";
-      vout << line << "\n";
-      return;
-    }
-  } else {
-    if (!att.empty()) {
-      newKey = att + ":" + key;
-    } else {
+  VPackSlice keySlice = s.get("_key");
+  if (keySlice.isString()) {
+    std::string key = keySlice.copyString();
+    size_t splitPos = key.find(':');
+    uint32_t pos = 0;
+    if (splitPos != std::string::npos) {
       newKey = key;
+      if (att != key.substr(0, splitPos)) {
+        std::cerr << "_key is already smart, but with the wrong smart graph "
+                     "attribute:\n"
+                  << line << "\n";
+      }
+    } else {
+      if (!att.empty()) {
+        newKey = att + ":" + key;
+      } else {
+        newKey = key;
+      }
     }
   }
 
   // Write out the potentially modified line:
-  vout << R"({"_key":")" << newKey << R"(",")" << smartAttr << R"(":")" << att
-       << '"';
+  vout << "{";
+  if (writeKey || !newKey.empty()) {
+    vout << R"("_key":")" << newKey << R"(",")";
+  }
+  vout << smartAttr << R"(":")" << att << '"';
   for (auto const& p : VPackObjectIterator(s)) {
     std::string attrName = p.key.copyString();
     if (attrName != "_key" && attrName != smartAttr) {
@@ -424,6 +422,11 @@ int doVertices(Options const& options) {
   if (it != options.end() && !it->second[0].empty()) {
     quo = it->second[0][0];
   }
+  bool writeKey = true;
+  it = options.find("--write-key");
+  if (it != options.end() && it->second[0] == "false") {
+    writeKey = false;
+  }
 
   // Only for JSONL:
   std::string smartDefault = "";
@@ -475,9 +478,11 @@ int doVertices(Options const& options) {
     bool newKeyColumn = false;
     keyPos = findColPos(colHeaders, "_key", inputFile);
     if (keyPos < 0) {
-      keyPos = ncols;
-      colHeaders.push_back("_key");
-      newKeyColumn = true;
+      if (writeKey) {
+        keyPos = ncols;
+        colHeaders.push_back("_key");
+        newKeyColumn = true;
+      }
     }
 
     // Write out header:
@@ -507,7 +512,7 @@ int doVertices(Options const& options) {
                          smartValuePos, smartIndex, keyPos, vout);
     } else {
       transformVertexJSONL(line, count, smartAttr, smartValue, smartIndex,
-                           smartDefault, vout);
+                           smartDefault, writeKey, vout);
     }
 
     ++count;
@@ -1039,7 +1044,7 @@ int doEdges(Options const& options) {
   }
 
   // Main work:
-  while (!vertexBuffer.isDone()) {
+  do {
     vertexBuffer.readMore(memLimit);
     if (type == CSV) {
       for (auto const& e : edgeCollections) {
@@ -1054,7 +1059,7 @@ int doEdges(Options const& options) {
         }
       }
     }
-  }
+  } while (!vertexBuffer.isDone());
   return 0;
 }
 
@@ -1068,6 +1073,46 @@ void runTests() {
   MYASSERT(s == "abc");
   s = quote("a\"b\"c", '"');
   MYASSERT(s == "\"a\"\"b\"\"c\"");
+  s = unquote("\"xyz\"", '"');
+  MYASSERT(s == "xyz");
+  s = unquote("xyz", '"');
+  MYASSERT(s == "xyz");
+  s = unquote("\"xy\"\"z\"", '"');
+  MYASSERT(s == "xy\"z");
+  s = quote("abc", 'a');
+  MYASSERT(s == "aaabca");
+
+  auto v = split("a,b,c", ',', '"');
+  MYASSERT(v.size() == 3);
+  MYASSERT(v[0] == "a");
+  MYASSERT(v[1] == "b");
+  MYASSERT(v[2] == "c");
+
+  v = split("\"a,b\",c", ',', '"');
+  MYASSERT(v.size() == 2);
+  MYASSERT(v[0] == "\"a,b\"");
+  MYASSERT(v[1] == "c");
+
+  v = split("\"a,b\",c", ',', '"');
+  MYASSERT(v.size() == 2);
+  MYASSERT(unquote(v[0], '"') == "a,b");
+  MYASSERT(v[1] == "c");
+
+  v = split("\"a,\"\"b\",c", ',', '"');
+  MYASSERT(v.size() == 2);
+  MYASSERT(v[0] == "\"a,\"\"b\"");
+  MYASSERT(v[1] == "c");
+
+  v = split("\"a,\"\"b\",c", ',', '"');
+  MYASSERT(v.size() == 2);
+  MYASSERT(unquote(v[0], '"') == "a,\"b");
+  MYASSERT(v[1] == "c");
+
+  v = split("\"a\"x\"a\",b,c", ',', '"');
+  MYASSERT(v.size() == 3);
+  MYASSERT(unquote(v[0], '"') == "aa");
+  MYASSERT(v[1] == "b");
+  MYASSERT(v[2] == "c");
 }
 
 int main(int argc, char* argv[]) {
