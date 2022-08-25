@@ -877,10 +877,7 @@ struct VertexBuffer {
     _trans.clear();
     while (_filePos < _vertexFiles.size()) {
       if (_trans.memUsage >= memLimit) {
-        std::cout << elapsed() << " Have read "
-                  << _trans.memUsage / (1024 * 1024) << " MB of vertex data."
-                  << std::endl;
-        return 0;
+        break;
       }
       if (!_fileOpen) {
         std::cout << elapsed() << " Opening vertex file "
@@ -919,7 +916,8 @@ struct VertexBuffer {
       if (!getline(_currentInput, line)) {
         _currentInput.close();
         ++_filePos;
-        continue;
+        _fileOpen = false;
+        continue;  // will read more from next file
       }
       ++_count;
       if (_type == CSV) {
