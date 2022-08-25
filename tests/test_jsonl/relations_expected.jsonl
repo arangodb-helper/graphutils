@@ -1,0 +1,10 @@
+{"_key":"AU:1:CA","_from":"profiles/AU:2","_to":"profiles/CA:1"}
+{"_key":"US:2:CA","_from":"profiles/US:3","_to":"profiles/CA:1"}
+{"_key":"US:3:CA","_from":"profiles/US:3","_to":"profiles/CA:1"}
+{"_key":"AU:4:US","_from":"profiles/AU:6","_to":"profiles/US:7"}
+{"_key":"AU:5:US","_from":"profiles/AU:6","_to":"profiles/US:10"}
+{"_key":"US:6:FR","_from":"profiles/US:10","_to":"profiles/FR:9"}
+{"_key":"AU:7:CA","_from":"profiles/AU:6","_to":"profiles/CA:1"}
+{"_key":"DE:8:FR","_from":"profiles/DE:5","_to":"profiles/FR:9"}
+{"_key":"FR:9:US","_from":"profiles/FR:9","_to":"profiles/US:10"}
+{"_key":"FR:10:US","_from":"profiles/FR:9","_to":"profiles/US:3"}
