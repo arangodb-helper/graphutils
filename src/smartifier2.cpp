@@ -324,13 +324,13 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
     ++count;
 
     if (count % 1000000 == 0) {
-      std::cout << "Have transformed " << count << " edges in " << e.fileName
-                << "..." << std::endl;
+      std::cout << elapsed() << " Have transformed " << count << " edges in "
+                << e.fileName << "..." << std::endl;
     }
   }
 
-  std::cout << "Have transformed " << count << " edges in " << e.fileName
-            << ", finished." << std::endl;
+  std::cout << elapsed() << " Have transformed " << count << " edges in "
+            << e.fileName << ", finished." << std::endl;
 
   ein.close();
   eout.close();
@@ -463,13 +463,13 @@ void transformEdgesJSONL(Translation& translation, std::string const& vcolname,
     ++count;
 
     if (count % 1000000 == 0) {
-      std::cout << "Have transformed " << count << " edges in " << ename
-                << "..." << std::endl;
+      std::cout << elapsed() << " Have transformed " << count << " edges in "
+                << ename << "..." << std::endl;
     }
   }
 
-  std::cout << "Have transformed " << count << " edges in " << ename
-            << ", finished." << std::endl;
+  std::cout << elapsed() << " Have transformed " << count << " edges in "
+            << ename << ", finished." << std::endl;
 
   ein.close();
   eout.close();
@@ -779,7 +779,8 @@ void doVertices(Options const& options) {
     ++count;
 
     if (count % 1000000 == 0) {
-      std::cout << "Have transformed " << count << " vertices." << std::endl;
+      std::cout << elapsed() << " Have transformed " << count << " vertices."
+                << std::endl;
     }
   }
 
@@ -811,7 +812,8 @@ void learnLineCSV(Translation& trans, std::string const& line, char sep,
       trans.memUsage += sizeof(std::pair<std::string, uint32_t>)  // attTab
                         + att.size() + 1       // actual string
                         + sizeof(std::string)  // smartAttributes
-                        + att.size() + 1;      // actual string
+                        + att.size() + 1       // actual string
+                        + 32;                  // unordered_map overhead
     } else {
       pos = it->second;
     }
@@ -819,7 +821,8 @@ void learnLineCSV(Translation& trans, std::string const& line, char sep,
     if (it2 == trans.keyTab.end()) {
       trans.keyTab.insert(std::make_pair(uniq, pos));
       trans.memUsage += sizeof(std::pair<std::string, uint32_t>)  // keyTab
-                        + uniq.size() + 1;  // actual string
+                        + uniq.size() + 1  // actual string
+                        + 32;              // unordered_map overhead
     }
   }
 }
