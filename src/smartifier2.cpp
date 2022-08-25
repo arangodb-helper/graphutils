@@ -76,7 +76,7 @@ static const char USAGE[] =
                                     the smart graph attribute value.
       --separator <separator>       Column separator for csv type [default: ,]
       --quote-char <quoteChar>      Quote character for csv type [default: "]
-      --smarte-default <smartDefault>  If given, this value is taken as the value
+      --smart-default <smartDefault>  If given, this value is taken as the value
                                     of the smart graph attribute if it is
                                     not given in a document (JSONL only)
       --randomize-smart <nr>        If given, random values are taken randomly from

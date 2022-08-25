@@ -14,6 +14,8 @@ asan:
 
 test: normal
 	./runTest.sh
+	build/smartifier2 --test
+	./testRunner.sh
 
 docker:
 	strip build/sampleGraphMaker build/smartifier
