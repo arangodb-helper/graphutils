@@ -793,10 +793,7 @@ void doVertices(Options const& options) {
   }
 }
 
-void learnLineCSV(Translation& trans, std::string const& line, char sep,
-                  char quo, int keyPos, std::string const& vertexCollName) {
-  std::vector<std::string> parts = split(line, sep, quo);
-  std::string key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+void learnSmartKey(Translation& trans, std::string const& key) {
   size_t splitPos = key.find(':');
   if (splitPos != std::string::npos) {
     // Before the colon is the smart graph attribute, after the colon there is
@@ -827,8 +824,25 @@ void learnLineCSV(Translation& trans, std::string const& line, char sep,
   }
 }
 
+void learnLineCSV(Translation& trans, std::string const& line, char sep,
+                  char quo, int keyPos, std::string const& vertexCollName) {
+  std::vector<std::string> parts = split(line, sep, quo);
+  std::string key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+  learnSmartKey(trans, key);
+}
+
 void learnLineJSONL(Translation& trans, std::string const& line,
-                    std::string const& vertexCollName) {}
+                    std::string const& vertexCollName) {
+  // Parse line to VelocyPack:
+  std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
+  VPackSlice s = b->slice();
+  VPackSlice keySlice = s.get("_key");
+  if (!keySlice.isString()) {
+    return;  // ignore line
+  }
+  std::string key = keySlice.copyString();
+  learnSmartKey(trans, key);
+}
 
 struct VertexBuffer {
  public:
