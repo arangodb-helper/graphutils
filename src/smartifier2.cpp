@@ -528,7 +528,8 @@ int doVertices(Options const& options) {
   return 0;
 }
 
-void learnSmartKey(Translation& trans, std::string const& key) {
+void learnSmartKey(Translation& trans, std::string const& key,
+                   std::string const& vertexCollName) {
   size_t splitPos = key.find(':');
   if (splitPos != std::string::npos) {
     // Before the colon is the smart graph attribute, after the colon there is
@@ -549,6 +550,7 @@ void learnSmartKey(Translation& trans, std::string const& key) {
     } else {
       pos = it->second;
     }
+    uniq = vertexCollName + "/" + uniq;
     auto it2 = trans.keyTab.find(uniq);
     if (it2 == trans.keyTab.end()) {
       trans.keyTab.insert(std::make_pair(uniq, pos));
@@ -563,7 +565,7 @@ void learnLineCSV(Translation& trans, std::string const& line, char sep,
                   char quo, int keyPos, std::string const& vertexCollName) {
   std::vector<std::string> parts = split(line, sep, quo);
   std::string key = unquote(parts[keyPos], quo);  // Copy here temporarily!
-  learnSmartKey(trans, key);
+  learnSmartKey(trans, key, vertexCollName);
 }
 
 void learnLineJSONL(Translation& trans, std::string const& line,
@@ -576,7 +578,7 @@ void learnLineJSONL(Translation& trans, std::string const& line,
     return;  // ignore line
   }
   std::string key = keySlice.copyString();
-  learnSmartKey(trans, key);
+  learnSmartKey(trans, key, vertexCollName);
 }
 
 int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
@@ -649,12 +651,12 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
         // already transformed
         return found.substr(slashpos + 1, colPos - slashpos - 1);
       }
-      std::string key = found.substr(slashpos + 1);
-      auto it = translation.keyTab.find(key);
+      auto it = translation.keyTab.find(found);
       if (it == translation.keyTab.end()) {
         // Did not find key, simply go on
         return "";
       }
+      std::string key = found.substr(slashpos + 1);
       parts[pos] =
           quote(found.substr(0, slashpos + 1) +
                     translation.smartAttributes[it->second] + ":" + key,
@@ -744,12 +746,12 @@ int transformEdgesJSONL(Translation& translation, EdgeCollection const& e) {
         // already transformed
         return newValue.substr(slashpos + 1, colPos - slashpos - 1);
       }
-      std::string key = newValue.substr(slashpos + 1);
-      auto it = translation.keyTab.find(key);
+      auto it = translation.keyTab.find(newValue);
       if (it == translation.keyTab.end()) {
         // Did not find key, simply go on
         return "";
       }
+      std::string key = newValue.substr(slashpos + 1);
       newValue = newValue.substr(0, slashpos + 1) +
                  translation.smartAttributes[it->second] + ":" + key;
       return translation.smartAttributes[it->second];
