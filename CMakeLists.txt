@@ -4,6 +4,8 @@ project (GraphUtils CXX)
 set (GraphUtils_VERSION_MAJOR 0)
 set (GraphUtils_VERSION_MINOR 3)
 
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+
 configure_file (
   "${PROJECT_SOURCE_DIR}/include/GraphUtilsConfig.h.in"
   "${PROJECT_BINARY_DIR}/GraphUtilsConfig.h"
@@ -44,3 +46,17 @@ target_include_directories(smartifier2 PUBLIC)
 target_link_libraries(smartifier2 velocypack)
 set_property(TARGET smartifier2 PROPERTY CXX_STANDARD 20)
 set_property(TARGET smartifier2 PROPERTY CXX_STANDARD_REQUIRED ON)
+
+if(COVERAGE)
+if(CMAKE_COMPILER_IS_GNUCXX)
+    include(CodeCoverage)
+    append_coverage_compiler_flags()
+    setup_target_for_coverage_gcovr_html(
+      NAME tests_coverage
+      EXECUTABLE ../testRunner.sh
+      #EXECUTABLE tests 1200000 ..
+      DEPENDENCIES smartifier2
+      EXCLUDE "3rdParty/*"
+    )
+endif()
+endif()
