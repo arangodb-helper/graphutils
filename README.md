@@ -6,9 +6,105 @@ The following tools are here:
   1. `sampleGraphMaker`: Creates a sample graph that resembles a social
      network
   2. `smartifier`: Transfers graph data to smart graph format
+  3. `smartifier2`: Newer version with more features, but incompatible
+     usage.
 
-Overview and usage scenario
----------------------------
+Overview for `smartifier` Version 2
+-----------------------------------
+
+Quite often, one has graph data either as CSV files or as JSONL files,
+but outside of ArangoDB. One would like to import the data, but things
+have to be massaged a bit to use the smart graph functionality of
+ArangoDB.
+
+What does this "smart graph functionality" do? Basically, it tries to
+use domain knowledge in the data, to do the sharding of a large graph
+better, such that "most" edges stay in a shard. That is, we want to
+find locality in the data. To this end, we use some attribute (the
+"smart graph attribute") in the data to do the sharding decision.
+However, since the API of ArangoDB by definition has to find documents
+by their primary key, the primary keys of the vertices have to be chosen
+in a special way. Namely, they have to start with the value of the
+smart graph attribute, followed by a colon and only then by the actual
+original key. This setup achieves the best combination, namely:
+
+  - it keeps data locality (provided the smart graph attribute is well chosen)
+  - it allows finding the right shard by only looking at the key
+
+The smartifier is a tool, which rewrites the input data, such that it
+can be imported directly into an ArangoDB smart graph.
+
+
+Usage of `smartifier2`
+----------------------
+
+```
+  smartifier2 vertices --input <input>
+                       --output <outputfile>
+                       --smart-graph-attribute <smartgraphattr>
+                       [ --type <type> ]
+                       [ --write-key <bool>]
+                       [ --memory <memory> ]
+                       [ --smart-value <smartvalue> ]
+                       [ --smart-index <smartindex> ]
+                       [ --separator <separator> ]
+                       [ --quote-char <quotechar> ]
+                       [ --smart-default <smartdefault> ]
+                       [ --randomize-smart <nr> ]
+                       [ --rename-column <nr>:<newname> ... ]
+  smartifier2 edges --vertices <vertices>... 
+                    --edges <edges>...
+                    [ --from-attribute <fromattribute> ]
+                    [ --to-attribute <toattribute> ]
+                    [ --type <type> ]
+                    [ --memory <memory> ]
+                    [ --separator <separator> ]
+                    [ --quote-char <quotechar> ]
+                    [ --rename-column <nr>:<newname> ... ]
+
+Options:
+  --help (-h)                   Show this screen.
+  --version (-v)                Show version.
+  --input <input> (-i)          Input file for vertex mode.
+  --output <output> (-o)        Output file for vertex mode.
+  --smart-graph-attribute <smartgraphattr>  
+                                Attribute name of the smart graph attribute.
+  --type <type>                 Data type "csv" or "jsonl" [default: csv]
+  --write-key                   If present, the `_key` attribute will be written as
+                                it is necessary for a smart graph. If not given, the
+                                `_key` attribute is not touched or written.
+  --memory <memory>             Limit RAM usage in MiB [default: 4096]
+  --smart-value <smartvalue>    Attribute name to get the smart graph attribute value from.
+  --smart-index <smartindex>    If given, only this many characters are taken from the 
+                                beginnin of the smart value to form
+                                the smart graph attribute value.
+  --separator <separator>       Column separator for csv type [default: ,]
+  --quote-char <quoteChar>      Quote character for csv type [default: "]
+  --smart-default <smartDefault>  If given, this value is taken as the value
+                                of the smart graph attribute if it is
+                                not given in a document (JSONL only)
+  --randomize-smart <nr>        If given, random values are taken randomly from
+                                0 .. <nr> - 1 as smart graph attribute value,
+                                unless the attribute is already there.
+  --rename-column <nr>:<newname>  Before processing starts, rename column
+                                number <nr> to <newname>, only relevant for
+                                CSV, can be used multiple times, <nr> is
+                                0-based.
+
+And additionally for edge mode:
+
+  --vertices <vertices>          Vertex data in the form
+                                 <collectionname>:<filename>, can be repeated.
+  --edges <edges>                Edge data in the form
+                                 <edgefilename>:<fromvertexcollection>:<tovertexcollection>.
+```
+
+Detailed explanation:
+
+To be continued...
+
+Overview and usage scenario for `smartifier` Version 1
+------------------------------------------------------
 
 The basic idea is to use `arangoexport` to extract graph collection data
 from an ArangoDB instance (single server or cluster), run the `smartifier`
