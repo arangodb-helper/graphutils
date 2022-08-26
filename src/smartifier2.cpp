@@ -57,6 +57,7 @@ static const char USAGE[] =
                         [ --separator <separator> ]
                         [ --quote-char <quotechar> ]
                         [ --rename-column <nr>:<newname> ... ]
+                        [ --smart-index <index> ]
 
     Options:
       --help (-h)                   Show this screen.
@@ -93,6 +94,11 @@ static const char USAGE[] =
                                      <collectionname>:<filename>, can be repeated.
       --edges <edges>                Edge data in the form
                                      <edgefilename>:<fromvertexcollection>:<tovertexcollection>.
+      --smart-index <index>          If given here, no vertex data must be
+                                     given, and the smart graph attribute
+                                     will be the first <index> characters
+                                     of the key, so we can transform _from
+                                     and _to locally.
 )";
 
 enum DataType { CSV = 0, JSONL = 1 };
@@ -587,7 +593,7 @@ void learnLineJSONL(Translation& trans, std::string const& line,
 }
 
 int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
-                      char sep, char quo) {
+                      char sep, char quo, int smartIndex) {
   std::cout << "Transforming edges in " << e.fileName << " ..." << std::endl;
   std::fstream ein(e.fileName, std::ios_base::in);
   std::fstream eout(e.fileName + ".out", std::ios_base::out);
@@ -656,17 +662,27 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
         // already transformed
         return found.substr(slashpos + 1, colPos - slashpos - 1);
       }
-      auto it = translation.keyTab.find(found);
-      if (it == translation.keyTab.end()) {
-        // Did not find key, simply go on
-        return "";
+      if (smartIndex > 0) {
+        // Case of no vertex collections, just prepend a few characters
+        // of the key.
+        std::string att = found.substr(slashpos + 1, smartIndex);
+        parts[pos] = quote(found.substr(0, slashpos + 1) + att + ":" +
+                               found.substr(slashpos + 1),
+                           quo);
+        return att;
+      } else {
+        auto it = translation.keyTab.find(found);
+        if (it == translation.keyTab.end()) {
+          // Did not find key, simply go on
+          return "";
+        }
+        std::string key = found.substr(slashpos + 1);
+        parts[pos] =
+            quote(found.substr(0, slashpos + 1) +
+                      translation.smartAttributes[it->second] + ":" + key,
+                  quo);
+        return translation.smartAttributes[it->second];
       }
-      std::string key = found.substr(slashpos + 1);
-      parts[pos] =
-          quote(found.substr(0, slashpos + 1) +
-                    translation.smartAttributes[it->second] + ":" + key,
-                quo);
-      return translation.smartAttributes[it->second];
     };
 
     std::string fromAttr = translate(fromPos, "_from", e.fromVertColl);
@@ -714,7 +730,8 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
   return 0;
 }
 
-int transformEdgesJSONL(Translation& translation, EdgeCollection const& e) {
+int transformEdgesJSONL(Translation& translation, EdgeCollection const& e,
+                        int smartIndex) {
   std::cout << elapsed() << " Transforming edges in " << e.fileName << " ..."
             << std::endl;
   std::fstream ein(e.fileName, std::ios_base::in);
@@ -751,15 +768,25 @@ int transformEdgesJSONL(Translation& translation, EdgeCollection const& e) {
         // already transformed
         return newValue.substr(slashpos + 1, colPos - slashpos - 1);
       }
-      auto it = translation.keyTab.find(newValue);
-      if (it == translation.keyTab.end()) {
-        // Did not find key, simply go on
-        return "";
+      if (smartIndex > 0) {
+        // Case of no vertex collections, just prepend a few characters
+        // of the key.
+        std::string att = newValue.substr(slashpos + 1, smartIndex);
+        newValue = newValue.substr(0, slashpos + 1) + att + ":" +
+                   newValue.substr(slashpos + 1);
+        return att;
+
+      } else {
+        auto it = translation.keyTab.find(newValue);
+        if (it == translation.keyTab.end()) {
+          // Did not find key, simply go on
+          return "";
+        }
+        std::string key = newValue.substr(slashpos + 1);
+        newValue = newValue.substr(0, slashpos + 1) +
+                   translation.smartAttributes[it->second] + ":" + key;
+        return translation.smartAttributes[it->second];
       }
-      std::string key = newValue.substr(slashpos + 1);
-      newValue = newValue.substr(0, slashpos + 1) +
-                 translation.smartAttributes[it->second] + ":" + key;
-      return translation.smartAttributes[it->second];
     };
 
     bool foundFrom;
@@ -876,6 +903,10 @@ struct VertexBuffer {
 
   bool isDone() { return _filePos >= _vertexFiles.size(); }
 
+  // Note that an empty VertexBuffer will be `isDone` right from the beginning,
+  // however, it is still possible to call `readMore` once. This is used in the
+  // case of the edge transformation without vertex collections.
+
   int readMore(size_t memLimit) {
     std::cout << elapsed() << " Reading vertices..." << std::endl;
     std::string line;
@@ -969,6 +1000,12 @@ int doEdges(Options const& options) {
   assert(it != options.end());  // there is a default
   size_t memLimit =
       strtoul(it->second[0].c_str(), nullptr, 10) * 1024 * 1024;  // in MBs
+                                                                  //
+  int64_t smartIndex = -1;  // does not count
+  it = options.find("--smart-index");
+  if (it != options.end()) {
+    smartIndex = strtol(it->second[0].c_str(), nullptr, 10);
+  }
 
   // Set up translator and set up vertex reader object
   // while vertex reader object not done
@@ -982,21 +1019,29 @@ int doEdges(Options const& options) {
   // Add vertex collections:
   it = options.find("--vertices");
   if (it == options.end()) {
-    std::cerr << "Need at least one vertex collection with the `--vertices` "
-                 "option. Giving up."
-              << std::endl;
-    return 1;
-  }
-  for (auto const& s : it->second) {
-    auto pos = s.find(":");
-    if (pos == std::string::npos) {
-      std::cerr << "Value for `--vertices` option needs to be of the form "
-                   "<collname>:<collfile>, but is: "
-                << s << " Giving up." << std::endl;
-      return 2;
+    // Strange, no vertex collections, there is only one use case, namely,
+    // that `--smart-value` is `_key` (implicit) and `--smart_index` is
+    // set. Then the smart graph attribute is a prefix of the key and
+    // thus can be derived from the key without lookup, therefore we
+    // need no vertex collections. Let's check this:
+    if (smartIndex <= 0) {
+      std::cerr << "Need at least one vertex collection with the `--vertices` "
+                   "option. Giving up."
+                << std::endl;
+      return 1;
     }
-    vertexBuffer._vertexCollNames.push_back(s.substr(0, pos));
-    vertexBuffer._vertexFiles.push_back(s.substr(pos + 1));
+  } else {
+    for (auto const& s : it->second) {
+      auto pos = s.find(":");
+      if (pos == std::string::npos) {
+        std::cerr << "Value for `--vertices` option needs to be of the form "
+                     "<collname>:<collfile>, but is: "
+                  << s << " Giving up." << std::endl;
+        return 2;
+      }
+      vertexBuffer._vertexCollNames.push_back(s.substr(0, pos));
+      vertexBuffer._vertexFiles.push_back(s.substr(pos + 1));
+    }
   }
 
   // Get the edge collections data:
@@ -1048,13 +1093,15 @@ int doEdges(Options const& options) {
     vertexBuffer.readMore(memLimit);
     if (type == CSV) {
       for (auto const& e : edgeCollections) {
-        if (transformEdgesCSV(vertexBuffer.translation(), e, sep, quo) != 0) {
+        if (transformEdgesCSV(vertexBuffer.translation(), e, sep, quo,
+                              smartIndex) != 0) {
           return 6;
         }
       }
     } else {
       for (auto const& e : edgeCollections) {
-        if (transformEdgesJSONL(vertexBuffer.translation(), e) != 0) {
+        if (transformEdgesJSONL(vertexBuffer.translation(), e, smartIndex) !=
+            0) {
           return 7;
         }
       }
