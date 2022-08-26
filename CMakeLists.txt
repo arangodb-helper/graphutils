@@ -16,6 +16,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include_directories("${PROJECT_BINARY_DIR}")
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3")
 
@@ -43,7 +45,10 @@ add_executable(smartifier2
   src/smartifier2.cpp
   src/CommandLineParsing.cpp)
 target_include_directories(smartifier2 PUBLIC)
-target_link_libraries(smartifier2 velocypack)
+target_link_libraries(smartifier2
+  velocypack
+  ${CMAKE_THREAD_LIBS_INIT}
+)
 set_property(TARGET smartifier2 PROPERTY CXX_STANDARD 20)
 set_property(TARGET smartifier2 PROPERTY CXX_STANDARD_REQUIRED ON)
 
