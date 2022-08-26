@@ -7,10 +7,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -58,6 +60,7 @@ static const char USAGE[] =
                         [ --quote-char <quotechar> ]
                         [ --rename-column <nr>:<newname> ... ]
                         [ --smart-index <index> ]
+                        [ --threads <nrthreads> ]
 
     Options:
       --help (-h)                   Show this screen.
@@ -99,6 +102,8 @@ static const char USAGE[] =
                                      will be the first <index> characters
                                      of the key, so we can transform _from
                                      and _to locally.
+      --threads <nrthreads>          Number of threads to use, only relevant
+                                     when multiple edge files are given.
 )";
 
 enum DataType { CSV = 0, JSONL = 1 };
@@ -592,17 +597,24 @@ void learnLineJSONL(Translation& trans, std::string const& line,
   learnSmartKey(trans, key, vertexCollName);
 }
 
-int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
-                      char sep, char quo, int smartIndex) {
-  std::cout << "Transforming edges in " << e.fileName << " ..." << std::endl;
+int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
+                      EdgeCollection const& e, char sep, char quo,
+                      int smartIndex) {
+  {
+    std::lock_guard<std::mutex> guard(mutex);
+    std::cout << "Transforming edges in " << e.fileName << " ..." << std::endl;
+  }
   std::fstream ein(e.fileName, std::ios_base::in);
   std::fstream eout(e.fileName + ".out", std::ios_base::out);
   std::string line;
 
   // First get the header line:
   if (!getline(ein, line)) {
-    std::cerr << "Could not read header line in edge file " << e.fileName
-              << std::endl;
+    {
+      std::lock_guard<std::mutex> guard(mutex);
+      std::cerr << "Could not read header line in edge file " << e.fileName
+                << std::endl;
+    }
     return 1;
   }
   std::vector<std::string> colHeaders = split(line, sep, quo);
@@ -634,6 +646,10 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
   int fromPos = findColPos(colHeaders, "_from", e.fileName);
   int toPos = findColPos(colHeaders, "_to", e.fileName);
   if (fromPos < 0 || toPos < 0) {
+    {
+      std::lock_guard<std::mutex> guard(mutex);
+      std::cerr << id << " Did not find _from or _to field." << std::endl;
+    }
     return 2;
   }
   // We tolerate -1 for the key pos, in which case we do not touch it!
@@ -708,13 +724,17 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
     ++count;
 
     if (count % 1000000 == 0) {
-      std::cout << elapsed() << " Have transformed " << count << " edges in "
-                << e.fileName << "..." << std::endl;
+      std::lock_guard<std::mutex> guard(mutex);
+      std::cout << id << " " << elapsed() << " Have transformed " << count
+                << " edges in " << e.fileName << "..." << std::endl;
     }
   }
 
-  std::cout << elapsed() << " Have transformed " << count << " edges in "
-            << e.fileName << ", finished." << std::endl;
+  {
+    std::lock_guard<std::mutex> guard(mutex);
+    std::cout << id << " " << elapsed() << " Have transformed " << count
+              << " edges in " << e.fileName << ", finished." << std::endl;
+  }
 
   ein.close();
   eout.close();
@@ -730,10 +750,13 @@ int transformEdgesCSV(Translation& translation, EdgeCollection const& e,
   return 0;
 }
 
-int transformEdgesJSONL(Translation& translation, EdgeCollection const& e,
-                        int smartIndex) {
-  std::cout << elapsed() << " Transforming edges in " << e.fileName << " ..."
-            << std::endl;
+int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
+                        EdgeCollection const& e, int smartIndex) {
+  {
+    std::lock_guard<std::mutex> guard(mutex);
+    std::cout << id << " " << elapsed() << " Transforming edges in "
+              << e.fileName << " ..." << std::endl;
+  }
   std::fstream ein(e.fileName, std::ios_base::in);
   std::fstream eout(e.fileName + ".out", std::ios_base::out);
   std::string line;
@@ -750,8 +773,12 @@ int transformEdgesJSONL(Translation& translation, EdgeCollection const& e,
             std::string& newValue, bool& foundFlag) -> std::string {
       VPackSlice foundSlice = s.get(name);
       if (!foundSlice.isString()) {
-        std::cerr << "Found " << name << " entry which is not a string:\n"
-                  << line << std::endl;
+        {
+          std::lock_guard<std::mutex> guard(mutex);
+          std::cerr << id << " Found " << name
+                    << " entry which is not a string:\n"
+                    << line << std::endl;
+        }
         foundFlag = false;
         return "";
       }
@@ -853,19 +880,25 @@ int transformEdgesJSONL(Translation& translation, EdgeCollection const& e,
     ++count;
 
     if (count % 1000000 == 0) {
-      std::cout << elapsed() << " Have transformed " << count << " edges in "
-                << e.fileName << "..." << std::endl;
+      std::lock_guard<std::mutex> guard(mutex);
+      std::cout << id << " " << elapsed() << " Have transformed " << count
+                << " edges in " << e.fileName << "..." << std::endl;
     }
   }
 
-  std::cout << elapsed() << " Have transformed " << count << " edges in "
-            << e.fileName << ", finished." << std::endl;
+  {
+    std::lock_guard<std::mutex> guard(mutex);
+    std::cout << id << " " << elapsed() << " Have transformed " << count
+              << " edges in " << e.fileName << ", finished." << std::endl;
+  }
 
   ein.close();
   eout.close();
 
   if (!eout.good()) {
-    std::cerr << "An error happened at close time for " << e.fileName + ".out"
+    std::lock_guard<std::mutex> guard(mutex);
+    std::cerr << id << " An error happened at close time for "
+              << e.fileName + ".out"
               << ", not renaming to the original name." << std::endl;
     return 1;
   }
@@ -1006,6 +1039,11 @@ int doEdges(Options const& options) {
   if (it != options.end()) {
     smartIndex = strtol(it->second[0].c_str(), nullptr, 10);
   }
+  size_t nrThreads = 1;
+  it = options.find("--threads");
+  if (it != options.end()) {
+    nrThreads = strtoul(it->second[0].c_str(), nullptr, 10);
+  }
 
   // Set up translator and set up vertex reader object
   // while vertex reader object not done
@@ -1091,20 +1129,45 @@ int doEdges(Options const& options) {
   // Main work:
   do {
     vertexBuffer.readMore(memLimit);
-    if (type == CSV) {
-      for (auto const& e : edgeCollections) {
-        if (transformEdgesCSV(vertexBuffer.translation(), e, sep, quo,
-                              smartIndex) != 0) {
-          return 6;
+    std::deque<EdgeCollection> queue;
+    std::mutex mutex;
+    int error = 0;
+    for (auto const& e : edgeCollections) {
+      queue.push_back(e);
+    }
+    auto worker = [&](size_t id) {
+      while (true) {  // left when queue empty
+        EdgeCollection e;
+        {
+          std::lock_guard<std::mutex> guard(mutex);
+          if (queue.size() == 0) {
+            break;
+          }
+          e = queue[0];
+          queue.pop_front();
+        }
+        if (type == CSV) {
+          if (transformEdgesCSV(mutex, id, vertexBuffer.translation(), e, sep,
+                                quo, smartIndex) != 0) {
+            error = 6;
+          }
+        } else {
+          if (transformEdgesJSONL(mutex, id, vertexBuffer.translation(), e,
+                                  smartIndex) != 0) {
+            error = 7;
+          }
         }
       }
-    } else {
-      for (auto const& e : edgeCollections) {
-        if (transformEdgesJSONL(vertexBuffer.translation(), e, smartIndex) !=
-            0) {
-          return 7;
-        }
-      }
+    };
+    std::vector<std::thread> threads;
+    for (size_t i = 0; i < nrThreads; ++i) {
+      threads.emplace_back(worker, i);
+    }
+    for (size_t i = 0; i < nrThreads; ++i) {
+      threads[i].join();
+    }
+    if (error != 0) {
+      return error;
     }
   } while (!vertexBuffer.isDone());
   return 0;
@@ -1186,6 +1249,7 @@ int main(int argc, char* argv[]) {
       {"--edges", OptionConfigItem(ArgType::StringMultiple)},
       {"--rename-column", OptionConfigItem(ArgType::StringMultiple)},
       {"--smart-default", OptionConfigItem(ArgType::StringOnce)},
+      {"--threads", OptionConfigItem(ArgType::StringOnce, "1")},
   };
 
   Options options;
