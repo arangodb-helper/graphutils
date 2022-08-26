@@ -10,6 +10,7 @@
 #include <deque>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
