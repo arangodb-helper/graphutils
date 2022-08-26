@@ -462,6 +462,11 @@ int doVertices(Options const& options) {
       return 3;
     }
     std::vector<std::string> colHeaders = split(line, sep, quo);
+    if (colHeaders.size() == 1) {
+      std::cerr << "Warning, found only one column in header, did you specify "
+                   "the right separator character?"
+                << std::endl;
+    }
     for (auto& s : colHeaders) {
       s = unquote(s, quo);
     }
@@ -619,6 +624,12 @@ int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
     return 1;
   }
   std::vector<std::string> colHeaders = split(line, sep, quo);
+  if (colHeaders.size() == 1) {
+    std::lock_guard<std::mutex> guard(mutex);
+    std::cerr << "Warning, found only one column in header, did you specify "
+                 "the right separator character?"
+              << std::endl;
+  }
   for (auto& s : colHeaders) {
     s = unquote(s, quo);
   }
