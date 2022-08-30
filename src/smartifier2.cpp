@@ -59,7 +59,6 @@ static const char USAGE[] =
                         [ --memory <memory> ]
                         [ --separator <separator> ]
                         [ --quote-char <quotechar> ]
-                        [ --rename-column <nr>:<newname> ... ]
                         [ --smart-index <index> ]
                         [ --threads <nrthreads> ]
 
@@ -71,22 +70,27 @@ static const char USAGE[] =
       --smart-graph-attribute <smartgraphattr>  
                                     Attribute name of the smart graph attribute.
       --type <type>                 Data type "csv" or "jsonl" [default: csv]
-      --write-key                   If present, the `_key` attribute will be written as
-                                    it is necessary for a smart graph. If not given, the
-                                    `_key` attribute is not touched or written.
+      --write-key                   If present, the `_key` attribute will be
+                                    written as it is necessary for a
+                                    smart graph. If not given, the
+                                    `_key` attribute is not touched or
+                                    written.
       --memory <memory>             Limit RAM usage in MiB [default: 4096]
-      --smart-value <smartvalue>    Attribute name to get the smart graph attribute value from.
-      --smart-index <smartindex>    If given, only this many characters are taken from the 
-                                    beginnin of the smart value to form
-                                    the smart graph attribute value.
+      --smart-value <smartvalue>    Attribute name to get the smart graph
+                                    attribute value from.
+      --smart-index <smartindex>    If given, only this many characters are
+                                    taken from the beginning of the
+                                    smart value to form the smart graph
+                                    attribute value.
       --separator <separator>       Column separator for csv type [default: ,]
       --quote-char <quoteChar>      Quote character for csv type [default: "]
       --smart-default <smartDefault>  If given, this value is taken as the value
                                     of the smart graph attribute if it is
                                     not given in a document (JSONL only)
-      --randomize-smart <nr>        If given, random values are taken randomly from
-                                    0 .. <nr> - 1 as smart graph attribute value,
-                                    unless the attribute is already there.
+      --randomize-smart <nr>        If given, random values are taken randomly
+                                    from 0 .. <nr> - 1 as smart graph
+                                    attribute value, unless the
+                                    attribute is already there.
       --rename-column <nr>:<newname>  Before processing starts, rename column
                                     number <nr> to <newname>, only relevant for
                                     CSV, can be used multiple times, <nr> is
@@ -95,9 +99,11 @@ static const char USAGE[] =
     And additionally for edge mode:
 
       --vertices <vertices>          Vertex data in the form
-                                     <collectionname>:<filename>, can be repeated.
+            <collectionname>:<filename>, can be repeated.
       --edges <edges>                Edge data in the form
-                                     <edgefilename>:<fromvertexcollection>:<tovertexcollection>.
+            <edgefilename>:<fromvertexcollection>:<tovertexcollection>.
+          If needed, append :<columnnumber>:<newcolumnname> pairs to rename
+          columns before processing.
       --smart-index <index>          If given here, no vertex data must be
                                      given, and the smart graph attribute
                                      will be the first <index> characters
@@ -1287,6 +1293,12 @@ int main(int argc, char* argv[]) {
     runTests();
     std::cout << "Done." << std::endl;
     return 0;
+  }
+  it = options.find("--randomize-smart");
+  if (it != options.end()) {
+    std::cout << "--randomize-smart is not yet implemented, giving up."
+              << std::endl;
+    return 1;
   }
 
   if (args.size() != 1 || (args[0] != "vertices" && args[0] != "edges")) {
