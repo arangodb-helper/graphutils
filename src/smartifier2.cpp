@@ -1295,7 +1295,7 @@ int main(int argc, char* argv[]) {
     return 0;
   }
   it = options.find("--randomize-smart");
-  if (it != options.end()) {
+  if (it != options.end() && it->second[0] != "false") {
     std::cout << "--randomize-smart is not yet implemented, giving up."
               << std::endl;
     return 1;
