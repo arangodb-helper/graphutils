@@ -51,6 +51,7 @@ static const char USAGE[] =
                            [ --smart-default <smartdefault> ]
                            [ --randomize-smart <nr> ]
                            [ --rename-column <nr>:<newname> ... ]
+                           [ --key-value <name> ]
       smartifier2 edges --vertices <vertices>... 
                         --edges <edges>...
                         [ --from-attribute <fromattribute> ]
@@ -95,6 +96,11 @@ static const char USAGE[] =
                                     number <nr> to <newname>, only relevant for
                                     CSV, can be used multiple times, <nr> is
                                     0-based.
+      --key-value <name>            Take the key value from the column/attribute
+                                    named <name>. The `_key` column/attribute
+                                    will be built using the smart graph
+                                    attribute value, a colon and the value
+                                    of the column/attribute named here.
 
     And additionally for edge mode:
 
