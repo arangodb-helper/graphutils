@@ -525,7 +525,7 @@ int doVertices(Options const& options) {
     keyPos = findColPos(colHeaders, "_key", inputFile);
     if (keyPos < 0) {
       if (writeKey) {
-        keyPos = ncols;
+        keyPos = colHeaders.size();
         colHeaders.push_back("_key");
         newKeyColumn = true;
       }
