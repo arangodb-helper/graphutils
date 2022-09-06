@@ -239,7 +239,7 @@ struct EdgeCollection {
 void transformVertexCSV(std::string const& line, uint64_t count, char sep,
                         char quo, size_t ncols, int smartAttrPos,
                         int smartValuePos, int smartIndex, int keyPos,
-                        std::fstream& vout) {
+                        int keyValuePos, std::fstream& vout) {
   std::vector<std::string> parts = split(line, sep, quo);
   // Extend with empty columns to get at least the right amount of cols:
   while (parts.size() < ncols) {
@@ -267,7 +267,12 @@ void transformVertexCSV(std::string const& line, uint64_t count, char sep,
 
   // Put the smart graph attribute into a prefix of the key, if it
   // is not already there:
-  std::string key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+  std::string key;
+  if (keyValuePos >= 0) {
+    key = unquote(parts[keyValuePos], quo);
+  } else {
+    key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+  }
   size_t splitPos = key.find(':');
   if (splitPos == std::string::npos) {
     // not yet transformed:
@@ -320,7 +325,8 @@ std::string smartToString(VPackSlice attSlice, std::string const& smartDefault,
 void transformVertexJSONL(std::string const& line, size_t count,
                           std::string const& smartAttr, std::string smartValue,
                           int smartIndex, std::string const& smartDefault,
-                          bool writeKey, std::fstream& vout) {
+                          bool writeKey, std::string const& keyValue,
+                          std::fstream& vout) {
   // Parse line to VelocyPack:
   std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
   VPackSlice s = b->slice();
@@ -343,7 +349,12 @@ void transformVertexJSONL(std::string const& line, size_t count,
 
   // Now consider the _key:
   std::string newKey;
-  VPackSlice keySlice = s.get("_key");
+  VPackSlice keySlice;
+  if (!keyValue.empty()) {
+    keySlice = s.get(keyValue);
+  } else {
+    keySlice = s.get("_key");
+  }
   if (keySlice.isString()) {
     std::string key = keySlice.copyString();
     size_t splitPos = key.find(':');
@@ -445,6 +456,11 @@ int doVertices(Options const& options) {
   if (it != options.end() && it->second[0] == "false") {
     writeKey = false;
   }
+  std::string keyValue;
+  it = options.find("--key-value");
+  if (it != options.end() && !it->second[0].empty()) {
+    keyValue = it->second[0];
+  }
 
   // Only for JSONL:
   std::string smartDefault = "";
@@ -460,6 +476,7 @@ int doVertices(Options const& options) {
   int smartAttrPos = -1;
   int smartValuePos = -1;
   int keyPos = -1;
+  int keyValuePos = -1;
   if (type == CSV) {
     // First get the header line:
     if (!getline(vin, line)) {
@@ -508,6 +525,17 @@ int doVertices(Options const& options) {
       }
     }
 
+    if (!keyValue.empty()) {
+      keyValuePos = findColPos(colHeaders, keyValue, inputFile);
+      if (keyValuePos < 0) {
+        if (writeKey) {
+          std::cerr << "Warning: could not find column for key value. "
+                       "Ignoring..."
+                    << std::endl;
+        }
+      }
+    }
+
     // Write out header:
     bool first = true;
     for (auto const& h : colHeaders) {
@@ -532,10 +560,10 @@ int doVertices(Options const& options) {
     }
     if (type == CSV) {
       transformVertexCSV(line, count + 1, sep, quo, ncols, smartAttrPos,
-                         smartValuePos, smartIndex, keyPos, vout);
+                         smartValuePos, smartIndex, keyPos, keyValuePos, vout);
     } else {
       transformVertexJSONL(line, count, smartAttr, smartValue, smartIndex,
-                           smartDefault, writeKey, vout);
+                           smartDefault, writeKey, keyValue, vout);
     }
 
     ++count;
@@ -1268,6 +1296,7 @@ int main(int argc, char* argv[]) {
       {"--rename-column", OptionConfigItem(ArgType::StringMultiple)},
       {"--smart-default", OptionConfigItem(ArgType::StringOnce)},
       {"--threads", OptionConfigItem(ArgType::StringOnce, "1")},
+      {"--key-value", OptionConfigItem(ArgType::StringOnce)},
   };
 
   Options options;
