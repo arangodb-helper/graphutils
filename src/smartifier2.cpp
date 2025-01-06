@@ -9,9 +9,12 @@
 #include <cstdio>
 #include <deque>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <openssl/evp.h>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -27,6 +30,41 @@
 #include "velocypack/velocypack-aliases.h"
 
 std::chrono::steady_clock::time_point startTime;
+
+std::string calculateSha1(const std::string &input) {
+  EVP_MD_CTX *context = EVP_MD_CTX_new();
+  if (context == nullptr) {
+    throw std::runtime_error("Failed to create EVP context");
+  }
+
+  if (EVP_DigestInit_ex(context, EVP_sha1(), nullptr) != 1) {
+    EVP_MD_CTX_free(context);
+    throw std::runtime_error("Failed to initialize digest");
+  }
+
+  if (EVP_DigestUpdate(context, input.c_str(), input.length()) != 1) {
+    EVP_MD_CTX_free(context);
+    throw std::runtime_error("Failed to update digest");
+  }
+
+  unsigned char hash[EVP_MAX_MD_SIZE];
+  unsigned int lengthOfHash = 0;
+
+  if (EVP_DigestFinal_ex(context, hash, &lengthOfHash) != 1) {
+    EVP_MD_CTX_free(context);
+    throw std::runtime_error("Failed to finalize digest");
+  }
+
+  EVP_MD_CTX_free(context);
+
+  std::stringstream ss;
+  for (unsigned int i = 0; i < lengthOfHash; i++) {
+    ss << std::hex << std::setw(2) << std::setfill('0')
+       << static_cast<int>(hash[i]);
+  }
+
+  return ss.str();
+}
 
 double elapsed() {
   auto now = std::chrono::steady_clock::now();
@@ -46,6 +84,7 @@ static const char USAGE[] =
                            [ --memory <memory> ]
                            [ --smart-value <smartvalue> ]
                            [ --smart-index <smartindex> ]
+                           [ --hash-smart-value <bool> ]
                            [ --separator <separator> ]
                            [ --quote-char <quotechar> ]
                            [ --smart-default <smartdefault> ]
@@ -121,7 +160,7 @@ static const char USAGE[] =
 
 enum DataType { CSV = 0, JSONL = 1 };
 
-std::vector<std::string> split(std::string const& line, char sep, char quo) {
+std::vector<std::string> split(std::string const &line, char sep, char quo) {
   size_t start = 0;
   size_t pos = 0;
   bool inQuote = false;
@@ -142,7 +181,7 @@ std::vector<std::string> split(std::string const& line, char sep, char quo) {
         continue;
       }
       ++pos;
-    } else {  // inQuote == true
+    } else { // inQuote == true
       if (line[pos] == quo) {
         if (pos + 1 < line.size() && line[pos + 1] == quo) {
           pos += 2;
@@ -159,7 +198,7 @@ std::vector<std::string> split(std::string const& line, char sep, char quo) {
   return res;
 }
 
-std::string unquote(std::string const& s, char quo) {
+std::string unquote(std::string const &s, char quo) {
   std::string res;
   size_t pos = s.find(quo);
   if (pos == std::string::npos) {
@@ -167,7 +206,7 @@ std::string unquote(std::string const& s, char quo) {
   }
 
   res.reserve(s.size());
-  ++pos;  // now pointing to the first character after the quote
+  ++pos; // now pointing to the first character after the quote
   bool inQuote = true;
   while (pos < s.size()) {
     if (inQuote) {
@@ -181,7 +220,7 @@ std::string unquote(std::string const& s, char quo) {
       } else {
         res.push_back(s[pos]);
       }
-    } else {  // not in quote
+    } else { // not in quote
       if (s[pos] == quo) {
         inQuote = true;
       }
@@ -191,13 +230,13 @@ std::string unquote(std::string const& s, char quo) {
   return res;
 }
 
-std::string quote(std::string const& s, char quo) {
+std::string quote(std::string const &s, char quo) {
   size_t pos = s.find(quo);
   if (pos == std::string::npos) {
     return s;
   }
   std::string res;
-  res.reserve(s.size() + 2);  // Usually enough
+  res.reserve(s.size() + 2); // Usually enough
   res.push_back(quo);
   for (pos = 0; pos < s.size(); ++pos) {
     if (s[pos] == quo) {
@@ -211,8 +250,8 @@ std::string quote(std::string const& s, char quo) {
   return res;
 }
 
-int findColPos(std::vector<std::string> const& colHeaders,
-               std::string const& header, std::string const& fileName) {
+int findColPos(std::vector<std::string> const &colHeaders,
+               std::string const &header, std::string const &fileName) {
   auto it = std::find(colHeaders.begin(), colHeaders.end(), header);
   if (it == colHeaders.end()) {
     std::cerr << "Did not find " << header << " in column headers in file '"
@@ -226,7 +265,7 @@ struct Translation {
   std::unordered_map<std::string, uint32_t> keyTab;
   std::unordered_map<std::string, uint32_t> attTab;
   std::vector<std::string> smartAttributes;
-  size_t memUsage = 0;  // strings in map plus table size
+  size_t memUsage = 0; // strings in map plus table size
   void clear() {
     keyTab.clear();
     attTab.clear();
@@ -242,10 +281,10 @@ struct EdgeCollection {
   std::vector<std::pair<int, std::string>> columnRenames;
 };
 
-void transformVertexCSV(std::string const& line, uint64_t count, char sep,
+void transformVertexCSV(std::string const &line, uint64_t count, char sep,
                         char quo, size_t ncols, int smartAttrPos,
-                        int smartValuePos, int smartIndex, int keyPos,
-                        int keyValuePos, std::fstream& vout) {
+                        int smartValuePos, int smartIndex, bool hashSmartValue,
+                        int keyPos, int keyValuePos, std::fstream &vout) {
   std::vector<std::string> parts = split(line, sep, quo);
   // Extend with empty columns to get at least the right amount of cols:
   while (parts.size() < ncols) {
@@ -263,6 +302,9 @@ void transformVertexCSV(std::string const& line, uint64_t count, char sep,
   std::string att;
   if (smartValuePos >= 0) {
     att = unquote(parts[smartValuePos], quo);
+    if (hashSmartValue) {
+      att = calculateSha1(att);
+    }
     if (smartIndex > 0) {
       att = att.substr(0, smartIndex);
     }
@@ -277,7 +319,7 @@ void transformVertexCSV(std::string const& line, uint64_t count, char sep,
   if (keyValuePos >= 0) {
     key = unquote(parts[keyValuePos], quo);
   } else {
-    key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+    key = unquote(parts[keyPos], quo); // Copy here temporarily!
   }
   size_t splitPos = key.find(':');
   if (splitPos == std::string::npos) {
@@ -300,7 +342,7 @@ void transformVertexCSV(std::string const& line, uint64_t count, char sep,
   vout << '\n';
 }
 
-std::string smartToString(VPackSlice attSlice, std::string const& smartDefault,
+std::string smartToString(VPackSlice attSlice, std::string const &smartDefault,
                           size_t count) {
   if (attSlice.isString()) {
     return attSlice.copyString();
@@ -312,27 +354,27 @@ std::string smartToString(VPackSlice attSlice, std::string const& smartDefault,
     std::cerr << "WARNING: Vertex with non-string smart graph attribute:\n"
               << count << ".\n";
     switch (attSlice.type()) {
-      case VPackValueType::Bool:
-      case VPackValueType::Double:
-      case VPackValueType::UTCDate:
-      case VPackValueType::Int:
-      case VPackValueType::UInt:
-      case VPackValueType::SmallInt:
-        return attSlice.toString();
-        std::cerr << "WARNING: Converted to String.\n";
-        break;
-      default:
-        std::cerr << "ERROR: Found a complextype, will not convert it.\n";
+    case VPackValueType::Bool:
+    case VPackValueType::Double:
+    case VPackValueType::UTCDate:
+    case VPackValueType::Int:
+    case VPackValueType::UInt:
+    case VPackValueType::SmallInt:
+      return attSlice.toString();
+      std::cerr << "WARNING: Converted to String.\n";
+      break;
+    default:
+      std::cerr << "ERROR: Found a complextype, will not convert it.\n";
     }
   }
   return "";
 }
 
-void transformVertexJSONL(std::string const& line, size_t count,
-                          std::string const& smartAttr, std::string smartValue,
-                          int smartIndex, std::string const& smartDefault,
-                          bool writeKey, std::string const& keyValue,
-                          std::fstream& vout) {
+void transformVertexJSONL(std::string const &line, size_t count,
+                          std::string const &smartAttr, std::string smartValue,
+                          int smartIndex, bool hashSmartValue,
+                          std::string const &smartDefault, bool writeKey,
+                          std::string const &keyValue, std::fstream &vout) {
   // Parse line to VelocyPack:
   std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
   VPackSlice s = b->slice();
@@ -342,6 +384,9 @@ void transformVertexJSONL(std::string const& line, size_t count,
   if (!smartValue.empty()) {
     VPackSlice valSlice = s.get(smartValue);
     att = smartToString(valSlice, smartDefault, count);
+    if (hashSmartValue) {
+      att = calculateSha1(att);
+    }
     if (smartIndex > 0) {
       att = att.substr(0, smartIndex);
     }
@@ -387,7 +432,7 @@ void transformVertexJSONL(std::string const& line, size_t count,
     vout << R"("_key":")" << newKey << R"(",")";
   }
   vout << smartAttr << R"(":")" << att << '"';
-  for (auto const& p : VPackObjectIterator(s)) {
+  for (auto const &p : VPackObjectIterator(s)) {
     std::string attrName = p.key.copyString();
     if (attrName != "_key" && attrName != smartAttr) {
       vout << ",\"" << attrName << "\":" << p.value.toJson();
@@ -396,11 +441,11 @@ void transformVertexJSONL(std::string const& line, size_t count,
   vout << "}\n";
 }
 
-void renameColumns(Options const& options,
-                   std::vector<std::string>& colHeaders) {
+void renameColumns(Options const &options,
+                   std::vector<std::string> &colHeaders) {
   auto it = options.find("--rename-column");
   if (it != options.end()) {
-    for (auto const& s : it->second) {
+    for (auto const &s : it->second) {
       auto pos = s.find(':');
       if (pos != std::string::npos) {
         size_t nr = strtoul(s.substr(0, pos).c_str(), nullptr, 10);
@@ -412,7 +457,7 @@ void renameColumns(Options const& options,
   }
 }
 
-int doVertices(Options const& options) {
+int doVertices(Options const &options) {
   auto input = getOption(options, "--input");
   if (!input) {
     std::cerr << "Need input file with --input option, giving up." << std::endl;
@@ -430,7 +475,8 @@ int doVertices(Options const& options) {
       (*getOption(options, "--smart-graph-attribute").value())[0];
   bool haveSmartValue = false;
   std::string smartValue;
-  int64_t smartIndex = -1;  // does not count
+  int64_t smartIndex = -1; // does not count
+  bool hashSmartValue = false;
   auto it = options.find("--smart-value");
   if (it != options.end()) {
     smartValue = it->second[0];
@@ -438,6 +484,10 @@ int doVertices(Options const& options) {
     it = options.find("--smart-index");
     if (it != options.end()) {
       smartIndex = strtol(it->second[0].c_str(), nullptr, 10);
+    }
+    it = options.find("--hash-smart-value");
+    if (it != options.end()) {
+      hashSmartValue = it->second[0] == "true";
     }
   }
   DataType type = CSV;
@@ -496,7 +546,7 @@ int doVertices(Options const& options) {
                    "the right separator character?"
                 << std::endl;
     }
-    for (auto& s : colHeaders) {
+    for (auto &s : colHeaders) {
       s = unquote(s, quo);
     }
     ncols = colHeaders.size();
@@ -544,7 +594,7 @@ int doVertices(Options const& options) {
 
     // Write out header:
     bool first = true;
-    for (auto const& h : colHeaders) {
+    for (auto const &h : colHeaders) {
       if (!first) {
         vout << sep;
       }
@@ -566,10 +616,12 @@ int doVertices(Options const& options) {
     }
     if (type == CSV) {
       transformVertexCSV(line, count + 1, sep, quo, ncols, smartAttrPos,
-                         smartValuePos, smartIndex, keyPos, keyValuePos, vout);
+                         smartValuePos, smartIndex, hashSmartValue, keyPos,
+                         keyValuePos, vout);
     } else {
       transformVertexJSONL(line, count, smartAttr, smartValue, smartIndex,
-                           smartDefault, writeKey, keyValue, vout);
+                           hashSmartValue, smartDefault, writeKey, keyValue,
+                           vout);
     }
 
     ++count;
@@ -590,8 +642,8 @@ int doVertices(Options const& options) {
   return 0;
 }
 
-void learnSmartKey(Translation& trans, std::string const& key,
-                   std::string const& vertexCollName) {
+void learnSmartKey(Translation &trans, std::string const &key,
+                   std::string const &vertexCollName) {
   size_t splitPos = key.find(':');
   if (splitPos != std::string::npos) {
     // Before the colon is the smart graph attribute, after the colon there is
@@ -604,11 +656,11 @@ void learnSmartKey(Translation& trans, std::string const& key,
       trans.smartAttributes.emplace_back(att);
       pos = static_cast<uint32_t>(trans.smartAttributes.size() - 1);
       trans.attTab.insert(std::make_pair(att, pos));
-      trans.memUsage += sizeof(std::pair<std::string, uint32_t>)  // attTab
-                        + att.size() + 1       // actual string
-                        + sizeof(std::string)  // smartAttributes
-                        + att.size() + 1       // actual string
-                        + 32;                  // unordered_map overhead
+      trans.memUsage += sizeof(std::pair<std::string, uint32_t>) // attTab
+                        + att.size() + 1      // actual string
+                        + sizeof(std::string) // smartAttributes
+                        + att.size() + 1      // actual string
+                        + 32;                 // unordered_map overhead
     } else {
       pos = it->second;
     }
@@ -616,35 +668,35 @@ void learnSmartKey(Translation& trans, std::string const& key,
     auto it2 = trans.keyTab.find(uniq);
     if (it2 == trans.keyTab.end()) {
       trans.keyTab.insert(std::make_pair(uniq, pos));
-      trans.memUsage += sizeof(std::pair<std::string, uint32_t>)  // keyTab
-                        + uniq.size() + 1  // actual string
-                        + 32;              // unordered_map overhead
+      trans.memUsage += sizeof(std::pair<std::string, uint32_t>) // keyTab
+                        + uniq.size() + 1 // actual string
+                        + 32;             // unordered_map overhead
     }
   }
 }
 
-void learnLineCSV(Translation& trans, std::string const& line, char sep,
-                  char quo, int keyPos, std::string const& vertexCollName) {
+void learnLineCSV(Translation &trans, std::string const &line, char sep,
+                  char quo, int keyPos, std::string const &vertexCollName) {
   std::vector<std::string> parts = split(line, sep, quo);
-  std::string key = unquote(parts[keyPos], quo);  // Copy here temporarily!
+  std::string key = unquote(parts[keyPos], quo); // Copy here temporarily!
   learnSmartKey(trans, key, vertexCollName);
 }
 
-void learnLineJSONL(Translation& trans, std::string const& line,
-                    std::string const& vertexCollName) {
+void learnLineJSONL(Translation &trans, std::string const &line,
+                    std::string const &vertexCollName) {
   // Parse line to VelocyPack:
   std::shared_ptr<VPackBuilder> b = VPackParser::fromJson(line);
   VPackSlice s = b->slice();
   VPackSlice keySlice = s.get("_key");
   if (!keySlice.isString()) {
-    return;  // ignore line
+    return; // ignore line
   }
   std::string key = keySlice.copyString();
   learnSmartKey(trans, key, vertexCollName);
 }
 
-int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
-                      EdgeCollection const& e, char sep, char quo,
+int transformEdgesCSV(std::mutex &mutex, size_t id, Translation &translation,
+                      EdgeCollection const &e, char sep, char quo,
                       int smartIndex) {
   {
     std::lock_guard<std::mutex> guard(mutex);
@@ -670,13 +722,13 @@ int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
                  "the right separator character?"
               << std::endl;
   }
-  for (auto& s : colHeaders) {
+  for (auto &s : colHeaders) {
     s = unquote(s, quo);
   }
   size_t ncols = colHeaders.size();
 
   // Rename columns:
-  for (auto const& p : e.columnRenames) {
+  for (auto const &p : e.columnRenames) {
     if (p.first >= 0 && p.first < colHeaders.size()) {
       colHeaders[p.first] = p.second;
     }
@@ -684,7 +736,7 @@ int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
 
   // Write out header:
   bool first = true;
-  for (auto const& h : colHeaders) {
+  for (auto const &h : colHeaders) {
     if (!first) {
       eout << sep;
     }
@@ -715,8 +767,8 @@ int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
       parts.emplace_back("");
     }
 
-    auto translate = [&](int pos, std::string const& name,
-                         std::string const& vertexCollDefault) -> std::string {
+    auto translate = [&](int pos, std::string const &name,
+                         std::string const &vertexCollDefault) -> std::string {
       std::string found = unquote(parts[pos], quo);
       size_t slashpos = found.find('/');
       if (slashpos == std::string::npos) {
@@ -802,8 +854,8 @@ int transformEdgesCSV(std::mutex& mutex, size_t id, Translation& translation,
   return 0;
 }
 
-int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
-                        EdgeCollection const& e, int smartIndex) {
+int transformEdgesJSONL(std::mutex &mutex, size_t id, Translation &translation,
+                        EdgeCollection const &e, int smartIndex) {
   {
     std::lock_guard<std::mutex> guard(mutex);
     std::cout << id << " " << elapsed() << " Transforming edges in "
@@ -821,8 +873,8 @@ int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
     VPackSlice s = b->slice();
 
     auto translate =
-        [&](std::string const& name, std::string const& vertexCollDefault,
-            std::string& newValue, bool& foundFlag) -> std::string {
+        [&](std::string const &name, std::string const &vertexCollDefault,
+            std::string &newValue, bool &foundFlag) -> std::string {
       VPackSlice foundSlice = s.get(name);
       if (!foundSlice.isString()) {
         {
@@ -894,8 +946,8 @@ int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
 
     // Write out the potentially modified line:
     bool written = false;
-    auto output = [&](bool found, std::string const& name,
-                      std::string const& newVal) {
+    auto output = [&](bool found, std::string const &name,
+                      std::string const &newVal) {
       if (found) {
         if (written) {
           eout << ',';
@@ -916,7 +968,7 @@ int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
     output(foundFrom, "_from", newFrom);
     output(foundTo, "_to", newTo);
 
-    for (auto const& p : VPackObjectIterator(s)) {
+    for (auto const &p : VPackObjectIterator(s)) {
       std::string attrName = p.key.copyString();
       if (attrName != "_key" && attrName != "_from" && attrName != "_to") {
         if (written) {
@@ -950,8 +1002,8 @@ int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
   if (!eout.good()) {
     std::lock_guard<std::mutex> guard(mutex);
     std::cerr << id << " An error happened at close time for "
-              << e.fileName + ".out"
-              << ", not renaming to the original name." << std::endl;
+              << e.fileName + ".out" << ", not renaming to the original name."
+              << std::endl;
     return 1;
   }
 
@@ -961,11 +1013,11 @@ int transformEdgesJSONL(std::mutex& mutex, size_t id, Translation& translation,
 }
 
 struct VertexBuffer {
- public:
+public:
   std::vector<std::string> _vertexCollNames;
   std::vector<std::string> _vertexFiles;
 
- private:
+private:
   Translation _trans;
   size_t _filePos;
   std::ifstream _currentInput;
@@ -976,15 +1028,10 @@ struct VertexBuffer {
   char _quoteChar;
   uint64_t _count;
 
- public:
+public:
   VertexBuffer(DataType type, char separator, char quoteChar)
-      : _filePos(0),
-        _fileOpen(false),
-        _type(type),
-        _keyPos(0),
-        _separator(separator),
-        _quoteChar(quoteChar),
-        _count(0) {}
+      : _filePos(0), _fileOpen(false), _type(type), _keyPos(0),
+        _separator(separator), _quoteChar(quoteChar), _count(0) {}
 
   bool isDone() { return _filePos >= _vertexFiles.size(); }
 
@@ -1021,7 +1068,7 @@ struct VertexBuffer {
           }
           std::vector<std::string> colHeaders =
               split(line, _separator, _quoteChar);
-          for (auto& s : colHeaders) {
+          for (auto &s : colHeaders) {
             s = unquote(s, _quoteChar);
           }
 
@@ -1038,7 +1085,7 @@ struct VertexBuffer {
         _currentInput.close();
         ++_filePos;
         _fileOpen = false;
-        continue;  // will read more from next file
+        continue; // will read more from next file
       }
       ++_count;
       if (_type == CSV) {
@@ -1058,10 +1105,10 @@ struct VertexBuffer {
     return 0;
   }
 
-  Translation& translation() { return _trans; }
+  Translation &translation() { return _trans; }
 };
 
-int doEdges(Options const& options) {
+int doEdges(Options const &options) {
   // Check options, find vertex colls and edge colls
   DataType type = CSV;
   auto it = options.find("--type");
@@ -1082,11 +1129,11 @@ int doEdges(Options const& options) {
   }
 
   it = options.find("--memory");
-  assert(it != options.end());  // there is a default
+  assert(it != options.end()); // there is a default
   size_t memLimit =
-      strtoul(it->second[0].c_str(), nullptr, 10) * 1024 * 1024;  // in MBs
-                                                                  //
-  int64_t smartIndex = -1;  // does not count
+      strtoul(it->second[0].c_str(), nullptr, 10) * 1024 * 1024; // in MBs
+                                                                 //
+  int64_t smartIndex = -1; // does not count
   it = options.find("--smart-index");
   if (it != options.end()) {
     smartIndex = strtol(it->second[0].c_str(), nullptr, 10);
@@ -1121,7 +1168,7 @@ int doEdges(Options const& options) {
       return 1;
     }
   } else {
-    for (auto const& s : it->second) {
+    for (auto const &s : it->second) {
       auto pos = s.find(":");
       if (pos == std::string::npos) {
         std::cerr << "Value for `--vertices` option needs to be of the form "
@@ -1143,7 +1190,7 @@ int doEdges(Options const& options) {
               << std::endl;
     return 3;
   }
-  for (auto const& e : it->second) {
+  for (auto const &e : it->second) {
     auto pos = e.find(':');
     if (pos == std::string::npos) {
       std::cerr << "Value for `--edges` option needs to be of the form "
@@ -1184,11 +1231,11 @@ int doEdges(Options const& options) {
     std::deque<EdgeCollection> queue;
     std::mutex mutex;
     int error = 0;
-    for (auto const& e : edgeCollections) {
+    for (auto const &e : edgeCollections) {
       queue.push_back(e);
     }
     auto worker = [&](size_t id) {
-      while (true) {  // left when queue empty
+      while (true) { // left when queue empty
         EdgeCollection e;
         {
           std::lock_guard<std::mutex> guard(mutex);
@@ -1225,9 +1272,9 @@ int doEdges(Options const& options) {
   return 0;
 }
 
-#define MYASSERT(t)                                         \
-  if (!(t)) {                                               \
-    std::cerr << "Error in line " << __LINE__ << std::endl; \
+#define MYASSERT(t)                                                            \
+  if (!(t)) {                                                                  \
+    std::cerr << "Error in line " << __LINE__ << std::endl;                    \
   }
 
 void runTests() {
@@ -1277,7 +1324,7 @@ void runTests() {
   MYASSERT(v[2] == "c");
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   startTime = std::chrono::steady_clock::now();
   OptionConfig optionConfig = {
       {"--help", OptionConfigItem(ArgType::Bool, "false", "-h")},
@@ -1295,6 +1342,7 @@ int main(int argc, char* argv[]) {
       {"--randomize-smart", OptionConfigItem(ArgType::Bool, "false")},
       {"--smart-value", OptionConfigItem(ArgType::StringOnce)},
       {"--smart-index", OptionConfigItem(ArgType::StringOnce)},
+      {"--hash-smart-value", OptionConfigItem(ArgType::Bool, "false")},
       {"--from-attribute", OptionConfigItem(ArgType::StringOnce, "_from")},
       {"--to-attribute", OptionConfigItem(ArgType::StringOnce, "_to")},
       {"--vertices", OptionConfigItem(ArgType::StringMultiple)},
@@ -1319,7 +1367,7 @@ int main(int argc, char* argv[]) {
   it = options.find("--version");
   if (it != options.end() && it->second[0] == "true") {
     std::cout << "smartifier2: Version " GRAPHUTILS_VERSION_MAJOR
-                 "." GRAPHUTILS_VERSION_MINOR;  // version string
+                 "." GRAPHUTILS_VERSION_MINOR; // version string
     return 0;
   }
   it = options.find("--test");
@@ -1349,4 +1397,3 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
-
