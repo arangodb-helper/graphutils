@@ -38,15 +38,8 @@ can be imported directly into an ArangoDB smart graph.
 Usage of `smartifier2`
 ----------------------
 
-The easiest way to use this tool is to use the Docker image. There
-is a Docker image `neunhoef/graphutils:latest` which contains the
-compiled tools for Linux systems under `/usr/local/bin`. Just run the
-Docker image locally and mount the place where your data is into the
-Docker container like so:
-
-```bash
-docker run -it -v /home/neunhoef/files:/files neunhoef/graphutils bash
-```
+The easiest way to use this tool is to use the Docker image. See the section 
+below for details.
 
 ```
 Smartifier2 - transform graph data into smart graph format
@@ -424,7 +417,7 @@ Simply run
     docker run -it -v /outsideData:/data neunhoef/graphutils bash
 
 You find yourself in a shell with the outsideData directory mounted
-under `/data`. The executables are in `/`.
+under `/data`. The executables are in `/usr/local/bin`.
 
 Usage of `smartifier`
 ---------------------
