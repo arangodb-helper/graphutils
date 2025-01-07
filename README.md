@@ -38,6 +38,16 @@ can be imported directly into an ArangoDB smart graph.
 Usage of `smartifier2`
 ----------------------
 
+The easiest way to use this tool is to use the Docker image. There
+is a Docker image `neunhoef/graphutils:latest` which contains the
+compiled tools for Linux systems under `/usr/local/bin`. Just run the
+Docker image locally and mount the place where your data is into the
+Docker container like so:
+
+```bash
+docker run -it -v /home/neunhoef/files:/files neunhoef/graphutils bash
+```
+
 ```
 Smartifier2 - transform graph data into smart graph format
 
@@ -49,6 +59,7 @@ Usage:
                        [ --write-key <bool>]
                        [ --smart-value <smartvalue> ]
                        [ --smart-index <smartindex> ]
+                       [ --hash-smart-value <bool> ]
                        [ --separator <separator> ]
                        [ --quote-char <quotechar> ]
                        [ --smart-default <smartdefault> ]
@@ -86,6 +97,10 @@ Options:
                                 taken from the beginning of the
                                 smart value to form the smart graph
                                 attribute value.
+  --hash-smart-value <bool>     If this is set to `true` the found smart value
+                                is first hashed using sha1, a potential smart index
+                                is applied after this. The default is `false` to 
+                                take the value directly.
   --separator <separator>       Column separator for csv type [default: ,]
   --quote-char <quoteChar>      Quote character for csv type [default: "]
   --smart-default <smartDefault>  If given, this value is taken as the value
@@ -167,8 +182,13 @@ or less sensible defaults:
     allows, for example, to create the smart graph attribute value from
     the prefix of a different attribute. This can also be used to create
     the smart graph attribute from a prefix of the `_key`.
+  - `--hash-smart-value`, if this is set to `true`, the found smart value
+    is first SHA1 hashed before it is used. This can be combined with smart
+    index, which will then take the given number of characters from the
+    hash value.
   - `--separator` specifies the field separator for CSV mode. By
     default, it is a comma `,`. This can only be a single character.
+    Note that giving `\t` uses a tab in most shells.
   - `--quote-char` specifies the quote character for CSV mode. A value
     can be put in quotes. If the quote character shows up in the quoted
     string twice in a row, this is translated into a single quote
